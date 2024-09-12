@@ -167,12 +167,12 @@ if __name__ == '__main__':
     labels = torch.cat(label_list, dim=0)
 
 
-    print(f'Number of images for no hemorrhage: {len(dataset.metadata["no_hemorrhage"] == 0)}')
-    print(f'Number of images for epidural hemorrhage: {len(dataset.metadata['epidural'])}')
-    print(f'Number of images for intraparenchymal hemorrhage: {len(dataset.metadata['intraparenchymal'])}')
-    print(f'Number of images for intraventricular hemorrhage: {len(dataset.metadata['intraventricular'])}')
-    print(f'Number of images for subarachnoid hemorrhage: {len(dataset.metadata['subarachnoid'])}')
-    print(f'Number of images for subdural hemorrhage: {len(dataset.metadata['subdural'])}')
+    print(f"Number of images for no hemorrhage: {len(dataset.metadata['no_hemorrhage'] == 0)}")
+    print(f"Number of images for epidural hemorrhage: {len(dataset.metadata['epidural'])}")
+    print(f"Number of images for intraparenchymal hemorrhage: {len(dataset.metadata['intraparenchymal'])}")
+    print(f"Number of images for intraventricular hemorrhage: {len(dataset.metadata['intraventricular'])}")
+    print(f"Number of images for subarachnoid hemorrhage: {len(dataset.metadata['subarachnoid'])}")
+    print(f"Number of images for subdural hemorrhage: {len(dataset.metadata['subdural'])}")
 
     t1 = time.time()
     print(f'Elapsed time: {t1-t0:.2f} seconds to load {num_batches} batches of 16 images each ({num_batches*batch_size} images total)')

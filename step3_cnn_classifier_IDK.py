@@ -245,15 +245,15 @@ class SupervisedClassifierObserver:
 
 # Example usage
 if __name__ == "__main__":
-    train_flag = False
+    train_flag = True
     load_flag = True
-
+#  csv_file, dicom_dir, transform=None):
     if train_flag:
-        full_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
-        root_dir='../../data',
-        csv_file='stage_2_train_reformat.csv',
-        verbose=False
-        )
+
+        full_dataset = RSNA_Intracranial_Hemorrhage_Dataset( 'data/stage_2_train_reformat.csv', 
+                                                '/data/rsna-intracranial-hemorrhage-detection/stage_2_train/')
+
+
 
         # Get the indices for the dataset
         dataset_size = len(full_dataset)
