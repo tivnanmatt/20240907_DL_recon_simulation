@@ -85,7 +85,7 @@ class SupervisedClassifierObserver:
                 print(f"Validation Loss after Epoch {epoch + 1}: {val_loss}")
 
             # Save the trained model weights
-            torch.save(self.model.state_dict(), 'supervised_classifier_resnet50_weights.pth')
+            torch.save(self.model.state_dict(), 'weights/supervised_classifier_resnet50_weights.pth')
 
     def validate(self, val_loader, num_iterations_val=10):
         total_loss = 0.0
@@ -243,7 +243,7 @@ if __name__ == "__main__":
 
     if load_flag:
         try:
-            observer.model.load_state_dict(torch.load('supervised_classifier_resnet50_weights.pth'))
+            observer.model.load_state_dict(torch.load('weights/supervised_classifier_resnet50_weights.pth'))
             print("Model weights loaded successfully.")
         except FileNotFoundError:
             print("Weights file not found. Training from scratch.")
