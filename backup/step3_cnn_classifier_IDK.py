@@ -140,7 +140,7 @@ class SupervisedClassifierObserver:
                     images, labels = next(train_loader_iter)
 
                 images = images.to(self.device)
-                labels = labels.to(self.device).long()
+                labels = labels.to(self.device)
 
                 optimizer.zero_grad()
                 outputs = self.model(images)
@@ -187,6 +187,8 @@ class SupervisedClassifierObserver:
 
         all_ground_truths = []
         all_predictions_gpu = []
+        total = 0
+        correct = 0
 
         self.model.eval()
         with torch.no_grad():
@@ -199,8 +201,11 @@ class SupervisedClassifierObserver:
                 outputs = self.model(images)  # Keep outputs on GPU for now
                 all_predictions_gpu.append(outputs)
                 _, predicted = torch.max(outputs.data, 1)  # Get the index of the max log-probability
+                _, true_labels = torch.max(labels.data, 1)
                 total += labels.size(0)
-                correct += (predicted == labels).sum().item()
+                correct += (predicted == true_labels).sum().item()
+                # its better to use torch.all() for multi-class classification
+                # correct += torch.all(predicted == true_labels, dim=1).sum().item()
 
         accuracy = correct / total
         print(f'Accuracy: {accuracy * 100:.2f}%')
@@ -232,14 +237,23 @@ class SupervisedClassifierObserver:
             results[i, 3] = np.sum((predictions == 0) & (y_true == 0))  # TN
 
         return accuracy, results
+    
 
     def print_evaluation(self, results, filename=None):
-        if filename:
-            np.savetxt(filename, results, fmt='%.4f', delimiter=',', header="TP,FP,FN,TN,AUC", comments='')
+        # Extract the results array from the tuple
+        results_array = results[1]  # The evaluation metrics are in the second element of the tuple
 
+        # Convert all elements to float to ensure consistent type
+        results_float = results_array.astype(float)
+
+        # Save the results to the file
+        if filename:
+            np.savetxt(filename, results_float, fmt='%.4f', delimiter=',', header="TP,FP,FN,TN,AUC", comments='')
+
+        # Print the evaluation table
         print(f"{'Disease':<20}{'TP':<10}{'FP':<10}{'FN':<10}{'TN':<10}{'AUC':<10}")
         for i, label in enumerate(self.labels):
-            tp, fp, fn, tn, auc = results[i]
+            tp, fp, fn, tn, auc = results_array[i]
             print(f"{label:<20}{int(tp):<10}{int(fp):<10}{int(fn):<10}{int(tn):<10}{auc:<10.4f}")
 
 
@@ -269,7 +283,7 @@ if __name__ == "__main__":
         train_dataset = Subset(full_dataset, train_indices)
         val_dataset = Subset(full_dataset, test_indices)
 
-        observer = SupervisedClassifierObserver(verbose=True, batch_size=64)
+        observer = SupervisedClassifierObserver(verbose=True, batch_size=16)
 
         if load_flag:
             try:
@@ -279,12 +293,12 @@ if __name__ == "__main__":
                 print("Weights file not found. Training from scratch.")
 
         # Train the model with the validation dataset
-        observer.train(train_dataset, val_dataset=val_dataset, num_epochs=1, num_iterations_train=100, num_iterations_val=10)
+        observer.train(train_dataset, val_dataset=val_dataset, num_epochs=10, num_iterations_train=100, num_iterations_val=10)
 
-    observer = SupervisedClassifierObserver(verbose=True, batch_size=64)
+    observer = SupervisedClassifierObserver(verbose=True, batch_size=16)
     observer.model.load_state_dict(torch.load('supervised_classifier_weights.pth'))
 
     eval_dataset = Subset(full_dataset, val_indices)
 
-    results = observer.evaluate(eval_dataset, num_patients=128)
+    results = observer.evaluate(eval_dataset, num_patients=8192)
     observer.print_evaluation(results, filename="supervised_classifier_results.csv")
