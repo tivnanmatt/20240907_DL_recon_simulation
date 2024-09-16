@@ -7,6 +7,8 @@ import pydicom
 class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
     def __init__(self, csv_file, dicom_dir, transform=None):
         self.metadata = pd.read_csv(csv_file)
+        # clip metadata to only include the first 10000 rows
+        self.metadata = self.metadata.iloc[:100000]
         self.dicom_dir = dicom_dir
         self.transform = transform
         self.hemorrhage_types = ['no_hemorrhage', 'epidural', 'intraparenchymal', 'intraventricular', 'subarachnoid', 'subdural']

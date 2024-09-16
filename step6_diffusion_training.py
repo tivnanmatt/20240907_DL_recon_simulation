@@ -17,6 +17,9 @@ from torch.utils.data.sampler import SubsetRandomSampler
 from torch.utils.data import DataLoader, Subset
 from sklearn.model_selection import train_test_split
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="3"
+
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
@@ -35,7 +38,7 @@ class DiffusionModel(nn.Module):
             flip_sin_to_cos=True,
             down_block_types=('DownBlock2D', 'AttnDownBlock2D', 'AttnDownBlock2D', 'AttnDownBlock2D'),
             up_block_types=('AttnUpBlock2D', 'AttnUpBlock2D', 'AttnUpBlock2D', 'UpBlock2D'),
-            block_out_channels=(32, 64, 128, 256),
+            block_out_channels=(128, 256, 512, 1024),
             layers_per_block=2,
             mid_block_scale_factor=1,
             downsample_padding=1,
@@ -108,7 +111,7 @@ class DiffusionModel(nn.Module):
                 train_loader, 
                 val_loader=None, 
                 time_sampler=None, 
-                T=0.0001, 
+                T=1.0, 
                 num_epochs=100, 
                 num_iterations_train=100,
                 num_iterations_val=10, 
@@ -118,7 +121,7 @@ class DiffusionModel(nn.Module):
         self.to(device)
 
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        ema = ExponentialMovingAverage(self.parameters(), decay=0.95)  # Exponential moving average for stabilizing training
+        # ema = ExponentialMovingAverage(self.parameters(), decay=0.95)  # Exponential moving average for stabilizing training
         criterion = nn.MSELoss()
 
         if time_sampler is None:
@@ -135,6 +138,8 @@ class DiffusionModel(nn.Module):
                     train_loader_iter = iter(train_loader)
                     x_0 = next(train_loader_iter).to(device)
 
+
+                brain_mask = torch.logical_and(x_0 > 0, x_0 < 80)
                 x_0 = self.HU_to_SU(x_0)
                 t = time_sampler(x_0.size(0)).to(device)
                 x_t = self.sample_x_t_given_x_0(x_0, t)
@@ -142,11 +147,12 @@ class DiffusionModel(nn.Module):
                 x_0 = self.SU_to_HU(x_0)
                 x_t = self.SU_to_HU(x_t)
                 x_0_hat = self.SU_to_HU(x_0_hat)
-                loss = criterion(x_0_hat, x_0)
+                loss = 0.01*criterion(x_0_hat, x_0)
+                loss += criterion(x_t[brain_mask], x_0[brain_mask])
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                ema.update()
+                # ema.update()
                 train_loss += loss.item()
             
             train_loss /= num_iterations_train
@@ -164,6 +170,7 @@ class DiffusionModel(nn.Module):
                         except StopIteration:
                             val_loader_iter = iter(val_loader)
                             x_0 = next(val_loader_iter).to(device)
+                        brain_mask = torch.logical_and(x_0 > 0, x_0 < 80)
                         x_0 = self.HU_to_SU(x_0)
                         t = time_sampler(x_0.size(0)).to(device)
                         x_t = self.sample_x_t_given_x_0(x_0, t)
@@ -171,8 +178,10 @@ class DiffusionModel(nn.Module):
                         x_0 = self.SU_to_HU(x_0)
                         x_t = self.SU_to_HU(x_t)
                         x_0_hat = self.SU_to_HU(x_0_hat)
-                        loss = criterion(x_0_hat, x_0)
+                        loss = 0.01*criterion(x_0_hat, x_0)
+                        loss += criterion(x_t[brain_mask], x_0[brain_mask])
                         val_loss += loss.item()
+
                 val_loss /= num_iterations_val
                 val_loss = np.sqrt(val_loss) # RMSE loss
                 print(f'Epoch {iEpoch}, Validation Loss: {val_loss}')
@@ -194,15 +203,15 @@ def main():
 
     # Dataset paths
     csv_file = 'data/stage_2_train_reformat.csv'
-    image_folder = '/data/rsna-intracranial-hemorrhage-detection/stage_2_train/'
+    image_folder = '../../data/rsna-intracranial-hemorrhage-detection/stage_2_train/'
 
     loadFlag=True
     trainFlag=True
 
     # Hyperparameters
-    batch_size = 8
+    batch_size = 4
     num_epochs = 50
-    num_iterations_train = 10
+    num_iterations_train = 100
     num_iterations_val = 10
     lr = 2e-4
     

@@ -2,9 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, WeightedRandomSampler
-
 from step2_dataset_dataloader import RSNA_Intracranial_Hemorrhage_Dataset
-
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, roc_curve, confusion_matrix, auc
 from sklearn.preprocessing import label_binarize
