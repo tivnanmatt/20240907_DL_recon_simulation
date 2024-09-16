@@ -70,7 +70,7 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
 
 # Usage Example
 if __name__ == '__main__':
-    dataset = RSNA_Intracranial_Hemorrhage_Dataset('data/stage_2_train_reformat.csv', '/data/rsna-intracranial-hemorrhage-detection/stage_2_train/')
+    dataset = RSNA_Intracranial_Hemorrhage_Dataset('data/stage_2_train_reformat.csv', '../data/rsna-intracranial-hemorrhage-detection/stage_2_train/')
     dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
 
     # Example of iterating over the dataset

@@ -206,7 +206,7 @@ if __name__ == "__main__":
 
     full_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
             'data/stage_2_train_reformat.csv',
-            '/data/rsna-intracranial-hemorrhage-detection/stage_2_train/')
+            '../data/rsna-intracranial-hemorrhage-detection/stage_2_train/')
 
     # Split dataset into train, validation, and test sets
     dataset_size = len(full_dataset)
@@ -238,6 +238,8 @@ if __name__ == "__main__":
     test_loader = DataLoader(test_dataset, batch_size=batch_size, sampler=test_sampler)
 
     observer = SupervisedClassifierObserver(verbose=True, batch_size=batch_size)
+
+    observer.model = torch.nn.DataParallel(observer.model, device_ids=[0,1])
 
     if load_flag:
         try:
