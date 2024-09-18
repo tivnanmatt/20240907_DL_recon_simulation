@@ -8,13 +8,13 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
     def __init__(self, csv_file, dicom_dir, transform=None):
         self.metadata = pd.read_csv(csv_file)
         # Clip metadata to only include the first 10000 rows
-        self.metadata = self.metadata.iloc
+        # self.metadata = self.metadata.iloc
         self.dicom_dir = dicom_dir
         self.transform = transform
         self.hemorrhage_types = ['no_hemorrhage', 'epidural', 'intraparenchymal', 'intraventricular', 'subarachnoid', 'subdural']
-        self.metadata['no_hemorrhage'] = (self.metadata['any'] == 0).astype(int)
+        # self.metadata['no_hemorrhage'] = (self.metadata['any'] == 0).astype(int)
         # Remove all images classified with multiple hemorrhage types
-        self.metadata = self.metadata[self.metadata[self.hemorrhage_types].sum(axis=1) <= 1].reset_index(drop=True)
+        # self.metadata = self.metadata[self.metadata[self.hemorrhage_types].sum(axis=1) <= 1].reset_index(drop=True)
 
     def __len__(self):
         return len(self.metadata)
@@ -26,8 +26,8 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
         labels = labels[self.hemorrhage_types]
         
         # Exclude multi-hemorrhage cases (if sum of hemorrhage types is greater than 1)
-        if labels.sum() > 1:
-            return self.__getitem__(idx+1)
+        # if labels.sum() > 1:
+        #     return self.__getitem__(idx+1)
         
         # One hot encoding: find the hemorrhage type (or no hemorrhage) and convert it to a one-hot vector
         hemorrhage_class = np.argmax(labels.to_numpy())  # Finds the index of the first 1 (or no hemorrhage if 0th is 1)
@@ -48,22 +48,6 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
         if image.shape[1] != 512 or image.shape[2] != 512:
             return self.__getitem__(idx+1)
         
-        # Select first 1000 patients
-        target_healthy = 500
-        target_hemorrhage = 100
-
-        selected_indices = []
-
-        no_hemorrhage_patients = self.metadata[self.metadata['no_hemorrhage'] ==1].head(target_healthy)
-        selected_indices.extend(no_hemorrhage_patients.index.tolist())
-
-        for hemorrhage_type in self.hemorrhage_types[1:]: 
-            hemorrhage_patients = self.metadata[self.metadata[hemorrhage_type] == 1].head(target_hemorrhage)
-            selected_indices.extend(hemorrhage_patients.index.tolist())
-
-        # Filter metadata
-        self.metadata = self.metadata.loc[selected_indices].reset_index(drop=True)
-
         # now do a 2x2 mean pooling to downsample the image to 256x256
         image = torch.nn.functional.avg_pool2d(image, kernel_size=2)
 

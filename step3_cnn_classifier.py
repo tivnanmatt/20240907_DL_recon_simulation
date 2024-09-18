@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, WeightedRandomSampler
-from step2_IDK import RSNA_Intracranial_Hemorrhage_Dataset
+from step2_dataset_dataloader import RSNA_Intracranial_Hemorrhage_Dataset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, roc_curve, confusion_matrix, auc
 from sklearn.preprocessing import label_binarize
@@ -14,8 +14,6 @@ import matplotlib.pyplot as plt
 from itertools import combinations
 import pandas as pd
 from torch_ema import ExponentialMovingAverage
-
-
 
 class SupervisedClassifier(nn.Module):
     def __init__(self):
@@ -84,7 +82,8 @@ class SupervisedClassifierObserver:
                 print(f"Validation Loss after Epoch {epoch + 1}: {val_loss}")
 
             # Save the trained model weights
-            torch.save(self.model.state_dict(), 'weights/supervised_classifier_resnet50_weights.pth')
+            # torch.save(self.model.state_dict(), 'weights/supervised_classifier_resnet50_weights.pth')
+            save_classifier(self.model, 'weights/supervised_classifier_resnet50_weights.pth')
 
     def validate(self, val_loader, num_iterations_val=10):
         total_loss = 0.0
@@ -227,26 +226,43 @@ class SupervisedClassifierObserver:
         self.compute_ovo_auc(ground_truths, predictions)
 
 
+def save_classifier(model, path='weights/supervised_classifier_resnet50_weights.pth'):
+    if isinstance(model, torch.nn.DataParallel):
+        torch.save(model.module.state_dict(), path)
+    else:
+        torch.save(model.state_dict(), path)
+    
+def load_classifier(model, path='weights/supervised_classifier_resnet50_weights.pth'):
+    if isinstance(model, torch.nn.DataParallel):
+        model.module.load_state_dict(torch.load(path))
+    else:
+        model.load_state_dict(torch.load(path))
+    return model
+
 # Example usage
 if __name__ == "__main__":
     train_flag = True
     load_flag = True
-    batch_size = 256
+    multiGPU_flag = True
+    device_ids = [0,1]
+    batch_size = 128
+    num_epochs = 5
+    num_iterations_train = 10
+    num_iterations_val = 5
+
+    from step0_common_info import dicom_dir
     
-    full_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
-            'data/stage_2_train_reformat.csv',
-            '/mnt/AXIS02_share/rsna-intracranial-hemorrhage-detection/stage_2_train/')
-
-    # Split dataset into train, validation, and test sets
-    dataset_size = len(full_dataset)
-    indices = list(range(dataset_size))
-
-    train_indices, temp_indices = train_test_split(indices, test_size=0.3, random_state=42)
-    val_indices, test_indices = train_test_split(temp_indices, test_size=0.5, random_state=42)
-
-    train_dataset = Subset(full_dataset, train_indices)
-    val_dataset = Subset(full_dataset, val_indices)
-    test_dataset = Subset(full_dataset, test_indices)
+    train_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
+            'data/metadata_training.csv',
+            dicom_dir)
+    
+    val_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
+            'data/metadata_validation.csv',
+            dicom_dir)
+    
+    test_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
+            'data/metadata_evaluation.csv',
+            dicom_dir)
 
     def compute_sample_weights(metadata, hemorrhage_types):
         class_counts = metadata[hemorrhage_types].sum(axis=0).to_numpy()
@@ -255,31 +271,32 @@ if __name__ == "__main__":
         sample_weights = sample_weights_matrix.sum(axis=1)
         return sample_weights
 
-    sample_weights = compute_sample_weights(full_dataset.metadata, full_dataset.hemorrhage_types)
-
-    train_sampler = WeightedRandomSampler(weights=sample_weights[train_indices], num_samples=len(train_indices), replacement=True)
+    sample_weights = compute_sample_weights(train_dataset.metadata, train_dataset.hemorrhage_types)
+    train_sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(train_dataset), replacement=True)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler)
 
-    val_sampler = WeightedRandomSampler(weights=sample_weights[val_indices], num_samples=len(val_indices), replacement=True)
+    sample_weights = compute_sample_weights(val_dataset.metadata, val_dataset.hemorrhage_types)
+    val_sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(val_dataset), replacement=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=val_sampler)
 
-    test_sampler = WeightedRandomSampler(weights=sample_weights[test_indices], num_samples=len(test_indices), replacement=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, sampler=test_sampler)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     observer = SupervisedClassifierObserver(verbose=True, batch_size=batch_size)
 
-    observer.model = torch.nn.DataParallel(observer.model, device_ids=[0,1])
+    if multiGPU_flag:
+        observer.model = torch.nn.DataParallel(observer.model, device_ids=device_ids)
+    
 
     if load_flag:
         try:
-            observer.model.load_state_dict(torch.load('weights/supervised_classifier_resnet50_weights.pth'))
+            observer.model = load_classifier(observer.model, 'weights/supervised_classifier_resnet50_weights.pth')
             print("Model weights loaded successfully.")
         except FileNotFoundError:
             print("Weights file not found. Training from scratch.")
 
     if train_flag:
         # Train the model
-        observer.train(train_loader, val_loader=val_loader, num_epochs=5, num_iterations_train=100, num_iterations_val=10)
+        observer.train(train_loader, val_loader=val_loader, num_epochs=num_epochs, num_iterations_train=num_iterations_train, num_iterations_val=num_iterations_val)
 
 
     results = observer.evaluate(test_loader, num_patients=len(test_dataset))
