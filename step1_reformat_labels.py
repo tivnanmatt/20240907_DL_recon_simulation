@@ -2,7 +2,8 @@ import pandas as pd
 
 
 # Load the CSV
-filename = '../data/rsna-intracranial-hemorrhage-detection/stage_2_train.csv'
+filename = '../rsna-intracranial-hemorrhage-detection/stage_2_train.csv'
+filename = '/mnt/AXIS02_share/rsna-intracranial-hemorrhage-detection/stage_2_train.csv'
 df = pd.read_csv(filename)
 
 # Extract patient IDs by splitting the 'ID' column

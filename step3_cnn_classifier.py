@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, WeightedRandomSampler
-from step2_dataset_dataloader import RSNA_Intracranial_Hemorrhage_Dataset
+from step2_IDK import RSNA_Intracranial_Hemorrhage_Dataset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, roc_curve, confusion_matrix, auc
 from sklearn.preprocessing import label_binarize
@@ -41,6 +41,7 @@ class SupervisedClassifier(nn.Module):
 class SupervisedClassifierObserver:
     def __init__(self, device=None, verbose=False, batch_size=32):
         self.device = device if device else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
         self.model = SupervisedClassifier().to(self.device)
         self.verbose = verbose
         self.batch_size = batch_size
@@ -145,11 +146,25 @@ class SupervisedClassifierObserver:
         predictions_prob = torch.softmax(torch.tensor(predictions), dim=1).numpy()
 
         ovr_auc_results = {}
+        plt.figure(figsize=(10,8))
         for i, label in enumerate(self.labels):
             fpr, tpr, _ = roc_curve(ground_truths_bin[:, i], predictions_prob[:, i])
             auc_ovr = auc(fpr, tpr)
             ovr_auc_results[label] = auc_ovr
             print(f"OvR AUC for {label}: {auc_ovr:.4f}")
+
+            # Plotting the ROC curve
+            plt.plot(fpr,tpr,label=f'{label} (AUC = {auc_ovr:.4f})')
+
+        plt.plot([0, 1], [0, 1], 'k--')
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('One-vs-Rest ROC Curve')
+        plt.legend(loc='lower right')
+        plt.savefig('figures/ovr_auc_roc_{}.png'.format(batch_size))
+        plt.close()
 
         # Save the results to a csv file
         df = pd.DataFrame(ovr_auc_results.items(), columns=['Hemorrhage Type', 'AUC'])
@@ -167,6 +182,7 @@ class SupervisedClassifierObserver:
         ovo_auc_results = {}
         class_pairs = list(combinations(range(6), 2))
 
+        plt.figure(figsize=(14,8))
         for pair in class_pairs:
             # Select only the samples where the ground truth is one of the two classes
             pair_idx = np.where(np.isin(ground_truths_bin, pair))[0]
@@ -179,6 +195,19 @@ class SupervisedClassifierObserver:
             auc_ovo = auc(fpr, tpr)
             ovo_auc_results[f"{self.labels[pair[0]]}_vs_{self.labels[pair[1]]}"] = auc_ovo
             print(f"OvO AUC for {self.labels[pair[0]]} vs {self.labels[pair[1]]}: {auc_ovo:.4f}")
+
+            # Plotting the ROC curve
+            plt.legend(loc='best')
+
+        plt.plot([0, 1], [0, 1], 'k--')
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('One-vs-One ROC Curve')
+        plt.legend(loc='center left', bbox_to_anchor=(1.02, 0.5), fontsize='small', borderaxespad=0.)
+        plt.savefig('figures/ovo_auc_roc_{}.png'.format(batch_size))
+        plt.close()
 
         # Save the results to a csv file
         df = pd.DataFrame(ovo_auc_results.items(), columns=['Hemorrhage Type Pair', 'AUC'])
@@ -202,11 +231,11 @@ class SupervisedClassifierObserver:
 if __name__ == "__main__":
     train_flag = True
     load_flag = True
-    batch_size = 64
-
+    batch_size = 256
+    
     full_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
             'data/stage_2_train_reformat.csv',
-            '../data/rsna-intracranial-hemorrhage-detection/stage_2_train/')
+            '/mnt/AXIS02_share/rsna-intracranial-hemorrhage-detection/stage_2_train/')
 
     # Split dataset into train, validation, and test sets
     dataset_size = len(full_dataset)
@@ -250,8 +279,8 @@ if __name__ == "__main__":
 
     if train_flag:
         # Train the model
-        observer.train(train_loader, val_loader=val_loader, num_epochs=40, num_iterations_train=100, num_iterations_val=10)
+        observer.train(train_loader, val_loader=val_loader, num_epochs=5, num_iterations_train=100, num_iterations_val=10)
 
 
-    results = observer.evaluate(test_loader, num_patients=8192)
+    results = observer.evaluate(test_loader, num_patients=len(test_dataset))
     observer.print_evaluation(results)
