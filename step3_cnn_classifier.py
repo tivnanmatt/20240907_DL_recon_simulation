@@ -137,6 +137,31 @@ class SupervisedClassifierObserver:
         all_ground_truths = torch.cat(all_ground_truths).cpu().numpy()
 
         return accuracy, all_ground_truths, all_predictions
+    
+    def get_classifier_output(self, data_loader):
+        self.model.eval()
+        all_predictions = []
+        all_probabilities = []
+        all_labels = []
+
+        with torch.no_grad():
+            for images, labels in tqdm(data_loader):
+                images = images.to(self.device)
+                labels = labels.to(self.device)
+                
+                outputs = self.model(images)
+                probabilities = torch.softmax(outputs, dim=1)
+                _, predicted = torch.max(outputs, 1)
+                
+                all_predictions.append(predicted.cpu().numpy())
+                all_probabilities.append(probabilities.cpu().numpy())
+                all_labels.append(labels.cpu().numpy())
+        
+        all_predictions = np.concatenate(all_predictions)
+        all_probabilities = np.concatenate(all_probabilities)
+        all_labels = np.concatenate(all_labels)
+
+        return all_labels, all_predictions, all_probabilities
 
 
     def compute_ovr_auc(self, ground_truths, predictions):
@@ -167,7 +192,7 @@ class SupervisedClassifierObserver:
 
         # Save the results to a csv file
         df = pd.DataFrame(ovr_auc_results.items(), columns=['Hemorrhage Type', 'AUC'])
-        df.to_csv('results/ovr_auc.csv', index=False)
+        df.to_csv('results/ovr_auc_{}.csv'.format(batch_size), index=False)
 
         print(f"One-vs-Rest AUC results saved to 'results/ovr_auc.csv'")
         
@@ -196,7 +221,7 @@ class SupervisedClassifierObserver:
             print(f"OvO AUC for {self.labels[pair[0]]} vs {self.labels[pair[1]]}: {auc_ovo:.4f}")
 
             # Plotting the ROC curve
-            plt.legend(loc='best')
+            plt.plot(fpr,tpr, label=f'{self.labels[pair[0]]} vs {self.labels[pair[1]]} (AUC = {auc_ovo:.4f})')
 
         plt.plot([0, 1], [0, 1], 'k--')
         plt.xlim([0.0, 1.0])
@@ -204,13 +229,13 @@ class SupervisedClassifierObserver:
         plt.xlabel('False Positive Rate')
         plt.ylabel('True Positive Rate')
         plt.title('One-vs-One ROC Curve')
-        plt.legend(loc='center left', bbox_to_anchor=(1.02, 0.5), fontsize='small', borderaxespad=0.)
+        plt.legend(loc='best')
         plt.savefig('figures/ovo_auc_roc_{}.png'.format(batch_size))
         plt.close()
 
         # Save the results to a csv file
         df = pd.DataFrame(ovo_auc_results.items(), columns=['Hemorrhage Type Pair', 'AUC'])
-        df.to_csv('results/ovo_auc.csv', index=False)
+        df.to_csv('results/ovo_auc_{}.csv'.format(batch_size), index=False)
 
         print(f"One-vs-One AUC results saved to 'results/ovo_auc.csv'")
 
@@ -227,21 +252,54 @@ class SupervisedClassifierObserver:
 
 
 def save_classifier(model, path='weights/supervised_classifier_resnet50_weights.pth'):
-    if isinstance(model, torch.nn.DataParallel):
-        torch.save(model.module.state_dict(), path)
-    else:
-        torch.save(model.state_dict(), path)
+        try:
+        # Check if model is wrapped in DataParallel
+            if isinstance(model, torch.nn.DataParallel):
+                # Save state_dict from the underlying module
+                state_dict = model.module.state_dict()
+            else:
+                # Save state_dict from the model directly
+                state_dict = model.state_dict()
+            
+            # Save the state_dict to the specified path
+            torch.save(state_dict, path)
+            print(f"Model weights saved successfully to {path}")
+    
+        except Exception as e:
+
+            print(f"Error saving model weights: {e}")
+    # if isinstance(model, torch.nn.DataParallel):
+    #     torch.save(model.module.state_dict(), path)
+    # else:
+    #     torch.save(model.state_dict(), path)
     
 def load_classifier(model, path='weights/supervised_classifier_resnet50_weights.pth'):
-    if isinstance(model, torch.nn.DataParallel):
-        model.module.load_state_dict(torch.load(path))
-    else:
-        model.load_state_dict(torch.load(path))
-    return model
+    try: 
+        state_dict = torch.load(path, weights_only=True)
+        print("State dict loaded successfully.")
+
+        print("State dict keys:", state_dict.keys())
+
+        if isinstance(model, torch.nn.DataParallel):
+            model.module
+
+        model.load_state_dict(state_dict, strict=False)
+
+        print("Model weights loaded successfully.")
+        return model
+    
+    except Exception as e:
+        print("Error loading model weights:", e)
+    
+    # if isinstance(model, torch.nn.DataParallel):
+    #     model.module.load_state_dict(torch.load(path))
+    # else:
+    #     model.load_state_dict(torch.load(path))
+    # return model
 
 # Example usage
 if __name__ == "__main__":
-    train_flag = True
+    train_flag = False
     load_flag = True
     multiGPU_flag = True
     device_ids = [0,1]
@@ -255,14 +313,21 @@ if __name__ == "__main__":
     train_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
             'data/metadata_training.csv',
             dicom_dir)
-    
+    print('Train dataset size:', len(train_dataset))
+
     val_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
             'data/metadata_validation.csv',
             dicom_dir)
+    print('Validation dataset size:', len(val_dataset))
     
     test_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
             'data/metadata_evaluation.csv',
             dicom_dir)
+    print('Test dataset size:', len(test_dataset))
+
+    print("Train class distribution:", train_dataset.metadata['subdural'].sum())
+    print("Val class distribution:", val_dataset.metadata['subdural'].sum())
+    print("Test class distribution:", test_dataset.metadata['subdural'].sum())
 
     def compute_sample_weights(metadata, hemorrhage_types):
         class_counts = metadata[hemorrhage_types].sum(axis=0).to_numpy()
@@ -301,3 +366,12 @@ if __name__ == "__main__":
 
     results = observer.evaluate(test_loader, num_patients=len(test_dataset))
     observer.print_evaluation(results)
+
+    # Obtain classifier output for the test set
+    all_labels, all_predictions, all_probabilities = observer.get_classifier_output(test_loader)
+    
+    # Example of how to print or use these outputs
+    print("Classifier outputs:")
+    print("Labels: ", all_labels)
+    print("Predictions: ", all_predictions, 'Length:', len(all_predictions))
+    print("Probabilities: ", all_probabilities)

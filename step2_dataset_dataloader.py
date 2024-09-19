@@ -3,6 +3,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import pandas as pd
 import pydicom
+from step0_common_info import dataset_dir, dicom_dir
 
 class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
     def __init__(self, csv_file, dicom_dir, transform=None):
@@ -56,7 +57,7 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
 
 # Usage Example
 if __name__ == '__main__':
-    dataset = RSNA_Intracranial_Hemorrhage_Dataset('data/stage_2_train_reformat.csv', '../data/rsna-intracranial-hemorrhage-detection/stage_2_train/')
+    dataset = RSNA_Intracranial_Hemorrhage_Dataset('data/stage_2_train_reformat.csv', dataset_dir + '/stage_2_train')
     dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
 
     # Example of iterating over the dataset
