@@ -33,6 +33,7 @@ class SupervisedClassifier(nn.Module):
         )
 
     def forward(self, x):
+        # print(f"Input batch size: {x.size()} on {x.device}")
         return self.resnet(x)
     
 
@@ -116,9 +117,9 @@ class SupervisedClassifierObserver:
         correct = 0
 
         self.model.eval()
+
         with torch.no_grad():
-            for _ in tqdm(range(num_patients // self.batch_size)):
-                images, labels = next(test_loader_iter)
+            for images, labels in tqdm(test_loader):
                 images = images.to(self.device)
                 labels = labels.to(self.device)
                 all_ground_truths.append(labels)
@@ -170,7 +171,7 @@ class SupervisedClassifierObserver:
         predictions_prob = torch.softmax(torch.tensor(predictions), dim=1).numpy()
 
         ovr_auc_results = {}
-        plt.figure(figsize=(10,8))
+        plt.figure(figsize=(6,6))
         for i, label in enumerate(self.labels):
             fpr, tpr, _ = roc_curve(ground_truths_bin[:, i], predictions_prob[:, i])
             auc_ovr = auc(fpr, tpr)
@@ -187,7 +188,7 @@ class SupervisedClassifierObserver:
         plt.ylabel('True Positive Rate')
         plt.title('One-vs-Rest ROC Curve')
         plt.legend(loc='lower right')
-        plt.savefig('figures/ovr_auc_roc_{}.png'.format(batch_size))
+        plt.savefig('figures/ovr_auc_roc_{}.png'.format(batch_size), dpi=300)
         plt.close()
 
         # Save the results to a csv file
@@ -206,7 +207,7 @@ class SupervisedClassifierObserver:
         ovo_auc_results = {}
         class_pairs = list(combinations(range(6), 2))
 
-        plt.figure(figsize=(14,8))
+        plt.figure(figsize=(6,6))
         for pair in class_pairs:
             # Select only the samples where the ground truth is one of the two classes
             pair_idx = np.where(np.isin(ground_truths_bin, pair))[0]
@@ -229,7 +230,7 @@ class SupervisedClassifierObserver:
         plt.xlabel('False Positive Rate')
         plt.ylabel('True Positive Rate')
         plt.title('One-vs-One ROC Curve')
-        plt.legend(loc='best')
+        plt.legend(loc='best', fontsize=5.8)
         plt.savefig('figures/ovo_auc_roc_{}.png'.format(batch_size))
         plt.close()
 
@@ -252,61 +253,61 @@ class SupervisedClassifierObserver:
 
 
 def save_classifier(model, path='weights/supervised_classifier_resnet50_weights.pth'):
-        try:
+        # try:
         # Check if model is wrapped in DataParallel
-            if isinstance(model, torch.nn.DataParallel):
-                # Save state_dict from the underlying module
-                state_dict = model.module.state_dict()
-            else:
-                # Save state_dict from the model directly
-                state_dict = model.state_dict()
+        #     if isinstance(model, torch.nn.DataParallel):
+        #         # Save state_dict from the underlying module
+        #         state_dict = model.module.state_dict()
+        #     else:
+        #         # Save state_dict from the model directly
+        #         state_dict = model.state_dict()
             
-            # Save the state_dict to the specified path
-            torch.save(state_dict, path)
-            print(f"Model weights saved successfully to {path}")
+        #     # Save the state_dict to the specified path
+        #     torch.save(state_dict, path)
+        #     print(f"Model weights saved successfully to {path}")
     
-        except Exception as e:
+        # except Exception as e:
 
-            print(f"Error saving model weights: {e}")
-    # if isinstance(model, torch.nn.DataParallel):
-    #     torch.save(model.module.state_dict(), path)
-    # else:
-    #     torch.save(model.state_dict(), path)
+        #     print(f"Error saving model weights: {e}")
+    if isinstance(model, torch.nn.DataParallel):
+        torch.save(model.module.state_dict(), path)
+    else:
+        torch.save(model.state_dict(), path)
     
 def load_classifier(model, path='weights/supervised_classifier_resnet50_weights.pth'):
-    try: 
-        state_dict = torch.load(path, weights_only=True)
-        print("State dict loaded successfully.")
+    # try: 
+    #     state_dict = torch.load(path, weights_only=True)
+    #     print("State dict loaded successfully.")
 
-        print("State dict keys:", state_dict.keys())
+    #     print("State dict keys:", state_dict.keys())
 
-        if isinstance(model, torch.nn.DataParallel):
-            model.module
+    #     if isinstance(model, torch.nn.DataParallel):
+    #         model.module
 
-        model.load_state_dict(state_dict, strict=False)
+    #     model.load_state_dict(state_dict, strict=False)
 
-        print("Model weights loaded successfully.")
-        return model
+    #     print("Model weights loaded successfully.")
+    #     return model
     
-    except Exception as e:
-        print("Error loading model weights:", e)
+    # except Exception as e:
+    #     print("Error loading model weights:", e)
     
-    # if isinstance(model, torch.nn.DataParallel):
-    #     model.module.load_state_dict(torch.load(path))
-    # else:
-    #     model.load_state_dict(torch.load(path))
-    # return model
+    if isinstance(model, torch.nn.DataParallel):
+        model.module.load_state_dict(torch.load(path))
+    else:
+        model.load_state_dict(torch.load(path))
+    return model
 
 # Example usage
 if __name__ == "__main__":
-    train_flag = False
+    train_flag = True
     load_flag = True
-    multiGPU_flag = True
+    multiGPU_flag = False
     device_ids = [0,1]
     batch_size = 128
     num_epochs = 5
     num_iterations_train = 10
-    num_iterations_val = 5
+    num_iterations_val = 1
 
     from step0_common_info import dicom_dir
     
@@ -363,15 +364,19 @@ if __name__ == "__main__":
         # Train the model
         observer.train(train_loader, val_loader=val_loader, num_epochs=num_epochs, num_iterations_train=num_iterations_train, num_iterations_val=num_iterations_val)
 
+    import time
+    t0 = time.time()
 
     results = observer.evaluate(test_loader, num_patients=len(test_dataset))
     observer.print_evaluation(results)
 
-    # Obtain classifier output for the test set
-    all_labels, all_predictions, all_probabilities = observer.get_classifier_output(test_loader)
+    print("Time taken for evaluation:", time.time() - t0)
+
+    # # Obtain classifier output for the test set
+    # all_labels, all_predictions, all_probabilities = observer.get_classifier_output(test_loader)
     
-    # Example of how to print or use these outputs
-    print("Classifier outputs:")
-    print("Labels: ", all_labels)
-    print("Predictions: ", all_predictions, 'Length:', len(all_predictions))
-    print("Probabilities: ", all_probabilities)
+    # # Example of how to print or use these outputs
+    # print("Classifier outputs:")
+    # print("Labels: ", all_labels)
+    # print("Predictions: ", all_predictions, 'Length:', len(all_predictions))
+    # print("Probabilities: ", all_probabilities)
