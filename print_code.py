@@ -7,7 +7,7 @@ import os
 def print_code():
     for root, dirs, files in os.walk("."):
         for file in files:
-            if file.endswith(".py"):
+            if file.endswith(".py") and file.startswith('step'):
                 print('----------------------------')
                 print(root + '/' + file)
                 with open(root + '/' + file, 'r') as f:

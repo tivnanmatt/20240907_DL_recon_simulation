@@ -6,7 +6,10 @@ import pydicom
 from step0_common_info import dataset_dir, dicom_dir
 
 class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
-    def __init__(self, csv_file, dicom_dir, transform=None):
+    def __init__(self, csv_file, dicom_dir=None, transform=None, patch_size=None):
+
+        if dicom_dir is None:
+            dicom_dir = dataset_dir + '/stage_2_train'
         self.metadata = pd.read_csv(csv_file)
         # Clip metadata to only include the first 10000 rows
         # self.metadata = self.metadata.iloc
@@ -17,10 +20,33 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
         # Remove all images classified with multiple hemorrhage types
         # self.metadata = self.metadata[self.metadata[self.hemorrhage_types].sum(axis=1) <= 1].reset_index(drop=True)
 
+        self.patch_size = patch_size
+
     def __len__(self):
         return len(self.metadata)
     
     def __getitem__(self, idx):
+
+        if isinstance(idx, slice):
+            start = idx.start
+            stop = idx.stop
+            step = idx.step
+
+            if start is None:
+                start = 0
+            if stop is None:
+                stop = len(self.metadata)
+            if step is None:
+                step = 1
+
+            image_list = []
+            label_list = []
+            for i in range(start, stop, step):
+                image, label = self.__getitem__(i)
+                image_list.append(image)
+                label_list.append(label)
+            return torch.concat(image_list, dim=0), torch.concat(label_list, dim=0)
+
         # Get the patient ID and corresponding labels
         patient_id = self.metadata.iloc[idx, 0]
         labels = self.metadata.iloc[idx, 1:]
@@ -51,6 +77,15 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
         
         # now do a 2x2 mean pooling to downsample the image to 256x256
         image = torch.nn.functional.avg_pool2d(image, kernel_size=2)
+
+        # clip to -1000 to 2000
+        image = torch.clip(image, -1000, 2000)
+
+        if self.patch_size:
+            # Randomly crop the image to the patch size
+            x = np.random.randint(0, 256 - self.patch_size)
+            y = np.random.randint(0, 256 - self.patch_size)
+            image = image[:, x:x+self.patch_size, y:y+self.patch_size]
 
         return image, torch.tensor(one_hot_labels, dtype=torch.float32)
 

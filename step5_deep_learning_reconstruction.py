@@ -1,3 +1,5 @@
+# step5_deep_learning_reconstruction.py
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -5,150 +7,69 @@ from torch.optim import Adam
 from tqdm import tqdm
 from step2_dataset_dataloader import RSNA_Intracranial_Hemorrhage_Dataset
 from torch.utils.data import DataLoader, WeightedRandomSampler
-from step4_iterative_reconstruction import HU_to_attenuation, attenuation_to_HU
+from step4_iterative_reconstruction import HU_to_attenuation, attenuation_to_HU, CTProjector
 from torch_ema import ExponentialMovingAverage
 from torch.utils.data import DataLoader, Subset
 from sklearn.model_selection import train_test_split
 from diffusers import UNet2DModel
 
-# visible devices are 1,2,3
-# import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3"
+import matplotlib.pyplot as plt  # Import matplotlib for plotting
+import os  # For creating directories and saving files
 
-
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 
 import time
 t0 = time.time()
-
-
-class CTProjector(nn.Module):
-    def __init__(self):
-        super(CTProjector, self).__init__()
-        self.U = nn.Parameter(torch.load('weights/U.pt'))
-        self.S = nn.Parameter(torch.load('weights/S.pt'))
-        self.V = nn.Parameter(torch.load('weights/V.pt'))
-
-        # make sure they are not trainable
-        self.U.requires_grad = False
-        self.S.requires_grad = False
-        self.V.requires_grad = False
-
-        self.condition_number = 1e2
-
-        self.idxNull = self.S < torch.max(self.S)/ self.condition_number
-        index_min_singular_value = torch.max(torch.where(~self.idxNull)[0])
-
-        # Ensure U, S, V are loaded on the correct device (e.g., GPU or CPU)
-        self.singular_values_list = torch.linspace(0, index_min_singular_value, 33)[1:].to(torch.int32)
-
-    def forward_project(self, image):
-        """
-        Simulates the forward projection of the image to generate a sinogram (batch-based).
-        """
-        assert isinstance(image, torch.Tensor)
-        assert len(image.shape) == 4  # Expecting batch, channel, height, width
-        batch_size = image.shape[0]
-        assert image.shape[1] == 1
-        assert image.shape[2] == 256
-        assert image.shape[3] == 256
-
-        # Flatten image to 2D for projection
-        x = image.view(batch_size, 256 * 256)
-        VT_x = torch.tensordot(x, self.V.T, dims=([1],[1])).view(batch_size, self.S.shape[0])
-        S_VT_x = self.S.view(1, -1) * VT_x
-        sinogram = torch.tensordot(S_VT_x, self.U, dims=([1],[1])).view(batch_size, 1, 72, 375)
-        return sinogram
-
-    def back_project(self, sinogram):
-        """
-        Inverse transformation from sinogram back to image space (batch-based).
-        """
-        assert isinstance(sinogram, torch.Tensor)
-        assert len(sinogram.shape) == 4  # Expecting batch, channel, height, width
-        batch_size = sinogram.shape[0]
-        assert sinogram.shape[1] == 1
-        assert sinogram.shape[2] == 72
-        assert sinogram.shape[3] == 375
-
-        # Flatten sinogram to 2D for back projection
-        y = sinogram.view(batch_size, 72 * 375)
-        UT_y = torch.tensordot(y, self.U.T, dims=([1],[1])).view(batch_size, self.S.shape[0])
-        S_UT_y = self.S.view(1, -1) * UT_y
-        V_S_UT_y = torch.tensordot(S_UT_y, self.V.T, dims=([1],[1])).view(batch_size, 1, 256, 256)
-        AT_y = V_S_UT_y
-        return AT_y
-
-    def pseudoinverse_reconstruction(self, sinogram, singular_values=None):
-        """
-        Performs the pseudo-inverse reconstruction using a list of singular values (batch-based).
-        """
-        assert isinstance(sinogram, torch.Tensor)
-        assert len(sinogram.shape) == 4  # Expecting batch, channel, height, width
-        batch_size = sinogram.shape[0]
-        assert sinogram.shape[1] == 1
-        assert sinogram.shape[2] == 72
-        assert sinogram.shape[3] == 375
-
-        # Flatten sinogram to 2D for reconstruction
-        y = sinogram.view(batch_size, 72 * 375)
-
-        x_tilde_components = []
-
-        # Handle the singular values and perform the reconstruction
-        invS = 1.0 / self.S
-        for i in range(len(singular_values)):
-            if i == 0:
-                sv_min = 0
-            else:
-                sv_min = singular_values[i - 1]
-            sv_max = singular_values[i]
-            # sv_min = 0
-            sv_max = singular_values[i]
-
-            _U = self.U[:, sv_min:sv_max]
-            _S = self.S[sv_min:sv_max]
-            _V = self.V[:, sv_min:sv_max]
-
-
-            idxNull = _S < 1e-4*torch.max(self.S)
-            _invS = torch.zeros_like(_S)
-            _invS[~idxNull] = 1.0 / _S[~idxNull]
-            
-            UT_y = torch.tensordot(y, _U.T, dims=([1],[1])).view(batch_size, _S.shape[0])
-            S_UT_y = _invS.view(1, -1) * UT_y
-            V_S_UT_y = torch.tensordot(S_UT_y, _V, dims=([1],[1])).view(batch_size, 1, 256, 256)
-
-            x_tilde_components.append(V_S_UT_y)
-
-        x_tilde_components = torch.cat(x_tilde_components, dim=1)
-
-        return x_tilde_components
-
-
 
 class DeepLearningReconstructor(nn.Module):
     def __init__(self):
         super(DeepLearningReconstructor, self).__init__()
 
-        block_out_channels = (128, 256, 512, 1024)
-        # block_out_channels = (16, 32, 64, 128)
+        # Simple CNN architecture as before
+        # def conv_block(in_channels, out_channels):
+        #     return nn.Sequential(
+        #         nn.Conv2d(in_channels, out_channels, 3, padding=1),
+        #         nn.BatchNorm2d(out_channels),
+        #         nn.SiLU()
+        #     )
+        
+        # self.model = nn.Sequential(
+        #     conv_block(1, 64),
+        #     conv_block(64, 128),
+        #     conv_block(128, 64),
+        #     conv_block(64, 32),
+        #     nn.Conv2d(32, 1, 3, padding=1)
+        # )
 
+        # self.model = nn.Sequential(
+        #     conv_block(1, 16),
+        #     conv_block(16, 16),
+        #     nn.Conv2d(16, 1, 3, padding=1)
+        # )
+
+        # block_out_channels = (128, 256, 512, 1024)
+        block_out_channels = (32, 64, 128, 256)
+        # block_out_channels = (16, 32, 64, 128)
+        # block_out_channels = (4, 8, 16, 32)
         
         layers_per_block = 4
-        # # layers_per_block = 2
+        # layers_per_block = 2
+
+
+
+        # identity
+        # self.head = nn.Identity() 
 
         self.unet = UNet2DModel(
-            sample_size=256,
+            sample_size=None,
             in_channels=1,  # 32 components from the pseudo-inverse
             out_channels=1,  # Final reconstructed image
             center_input_sample=False,
             time_embedding_type='positional',
             freq_shift=0,
             flip_sin_to_cos=True,
-            down_block_types=('DownBlock2D', 'AttnDownBlock2D', 'AttnDownBlock2D', 'AttnDownBlock2D'),
-            up_block_types=('AttnUpBlock2D', 'AttnUpBlock2D', 'AttnUpBlock2D', 'UpBlock2D'),
+            down_block_types=('DownBlock2D', 'DownBlock2D', 'AttnDownBlock2D', 'AttnDownBlock2D'),
+            up_block_types=('UpBlock2D', 'UpBlock2D', 'AttnUpBlock2D', 'AttnUpBlock2D'),
             block_out_channels=block_out_channels   ,
             layers_per_block=layers_per_block,
             mid_block_scale_factor=1,
@@ -158,7 +79,7 @@ class DeepLearningReconstructor(nn.Module):
             dropout=0.0,
             act_fn='silu',
             attention_head_dim=None,
-            norm_num_groups=1,
+            norm_num_groups=4,
             attn_norm_num_groups=None,
             norm_eps=1e-05,
             resnet_time_scale_shift='default',
@@ -168,61 +89,67 @@ class DeepLearningReconstructor(nn.Module):
             num_train_timesteps=None
         )
 
+        class LambdaLayer(nn.Module):
+            def __init__(self, lambd):
+                super(LambdaLayer, self).__init__()
+                self.lambd = lambd
+            def forward(self, x):
+                return self.lambd(x)
+
+        # conv 32 -> 1
+        # self.tail = nn.Conv2d(32, 1, 3, padding=1)
 
 
-
-        # that thing is actually very slow and big and bad so lets do a simply cnn
-
-        def conv_block(in_channels, out_channels):
-            return nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, 3, padding=1),
-                nn.BatchNorm2d(out_channels),
-                nn.SiLU()
-            )
-        
-        self.unet = nn.Sequential(
-            conv_block(1, 64),
-            conv_block(64, 128),
-            conv_block(128, 64),
-            conv_block(64, 32),
-            nn.Conv2d(32, 1, 3, padding=1)
+        self.model = nn.Sequential(
+            LambdaLayer(lambda x: self.unet(x, torch.zeros(x.shape[0], device=x.device))[0]),
         )
 
+
+    def to(self, *args, **kwargs):
+        self = super().to(*args, **kwargs)
+        self.unet = self.unet.to(*args, **kwargs)
+        self.model = self.model.to(*args, **kwargs)
+        return self
+
     def forward(self, x_tilde):
-        """
-        Forward pass of the model, which performs:
-        1. Pseudo-inverse reconstruction (breaking sinogram into 32 components).
-        2. Image processing via U-Net.
-        """
-        # t =  torch.zeros([x_tilde_components.shape[0]]).to(x_tilde_components.device)
-        x_hat = x_tilde + self.unet(x_tilde)
+        # x_hat = x_tilde + self.unet(x_tilde)
+        # t = torch.zeros(x_tilde.shape[0], device=x_tilde.device)
+        # x_hat = x_tilde + self.unet(x_tilde,t)[0]
+        # x_hat = self.model(x_tilde)
+        x_hat = x_tilde + self.model(x_tilde)
         return x_hat
+        
 
-    
-def train_model(projector, reconstructor, train_loader, val_loader=None, num_epochs=100, num_iterations_train=100, num_iterations_val=10, lr=1e-4, device='cuda'):
-
-    
+def train_model(projector, 
+                reconstructor, 
+                train_loader, 
+                val_loader=None, 
+                num_epochs=100, 
+                num_iterations_train=100, 
+                num_iterations_val=10, 
+                lr=1e-4,
+                patch_size = 256, 
+                device=device):
     assert isinstance(projector, CTProjector) or (isinstance(projector, torch.nn.DataParallel) and isinstance(projector.module, CTProjector))
     assert isinstance(reconstructor, DeepLearningReconstructor) or (isinstance(reconstructor, torch.nn.DataParallel) and isinstance(reconstructor.module, DeepLearningReconstructor))
 
     optimizer = Adam(reconstructor.parameters(), lr=lr)
 
-    # if the optimizer was saved, load it
+    # If the optimizer was saved, load it
     try:
         optimizer.load_state_dict(torch.load('weights/deep_learning_reconstructor_optimizer.pth'))
         print("Optimizer loaded successfully.")
     except FileNotFoundError:
         print("No optimizer state found. Starting from scratch.")
 
-
-    ema = ExponentialMovingAverage(reconstructor.parameters(), decay=0.95)
+    ema = ExponentialMovingAverage(reconstructor.parameters(), decay=0.995)
     criterion = nn.MSELoss()
-    
 
+    train_loader_iter = iter(train_loader)
+    
     for epoch in range(num_epochs):
         reconstructor.train()
         train_loss = 0
-        train_loader_iter = iter(train_loader)
 
         for _ in tqdm(range(num_iterations_train)):
             try:
@@ -232,7 +159,6 @@ def train_model(projector, reconstructor, train_loader, val_loader=None, num_epo
                 phantom, _ = next(train_loader_iter)
 
             phantom = phantom.to(device).float()
-            phantom[phantom < -1000.0] = -1000.0
 
             brain_mask = torch.logical_and(phantom > 0.0, phantom < 80.0)
 
@@ -242,46 +168,62 @@ def train_model(projector, reconstructor, train_loader, val_loader=None, num_epo
             if isinstance(projector, torch.nn.DataParallel):
                 sinogram = projector.module.forward_project(phantom)
             else:
-                sinogram = projector.forward_project(phantom)  # Updated to use class method
+                sinogram = projector.forward_project(phantom)
             
-            
-            I0 = 1e5
-            photon_counts = I0 * torch.exp(-sinogram)
-            photon_counts = torch.poisson(photon_counts)
-            noisy_sinogram = -torch.log((photon_counts + 1) / I0)
+            # I0 = 1e10
+            # photon_counts = I0 * torch.exp(-sinogram)
+            # photon_counts = torch.poisson(photon_counts)
+            # noisy_sinogram = -torch.log((photon_counts + 1) / I0)
 
             # Forward pass: reconstruct using U-Net
             optimizer.zero_grad()
 
-            # Step 1: Get 32 components from the pseudo-inverse reconstruction
-            
+            # Step 1: Get components from the pseudo-inverse reconstruction
             if isinstance(projector, torch.nn.DataParallel):
                 x_tilde_components = projector.module.pseudoinverse_reconstruction(sinogram, projector.module.singular_values_list)
             else:
                 x_tilde_components = projector.pseudoinverse_reconstruction(sinogram, projector.singular_values_list)
             
-            
             pseudoinverse = torch.sum(x_tilde_components, dim=1, keepdim=True)
+            # reconstruction = reconstructor(pseudoinverse)
             
-            reconstruction = reconstructor(pseudoinverse)
+            pseudoinverse_patches = torch.zeros(pseudoinverse.shape[0], 1, patch_size, patch_size, device=device)
+            phantom_patches = torch.zeros(pseudoinverse.shape[0], 1, patch_size, patch_size, device=device)
+            brain_mask_patches = torch.zeros(pseudoinverse.shape[0], 1, patch_size, patch_size, dtype=torch.bool, device=device)
+            for i in range(pseudoinverse.shape[0]):
+                # iRow = np.random.randint(64, 256-128)
+                # iCol = np.random.randint(64, 256-128)
+                if patch_size == 256:
+                    iRow = 0
+                    iCol = 0
+                else:
+                    iRow = np.random.randint(0, 256-patch_size)
+                    iCol = np.random.randint(0, 256-patch_size)
+                pseudoinverse_patches[i] = pseudoinverse[i, :, iRow:iRow+patch_size, iCol:iCol+patch_size]
+                phantom_patches[i] = phantom[i, :, iRow:iRow+patch_size, iCol:iCol+patch_size]
+                brain_mask_patches[i] = brain_mask[i, :, iRow:iRow+patch_size, iCol:iCol+patch_size]
+            
+            reconstruction_patches = reconstructor(pseudoinverse_patches)
 
             phantom = attenuation_to_HU(phantom)
-            reconstruction = attenuation_to_HU(reconstruction)
+            reconstruction_patches = attenuation_to_HU(reconstruction_patches)
             pseudoinverse = attenuation_to_HU(pseudoinverse)
 
+            phantom_patches = attenuation_to_HU(phantom_patches)
+            pseudoinverse_patches = attenuation_to_HU(pseudoinverse_patches)
+
             # Calculate MSE loss
-            brain_weight = 0.95
-            loss = (1-brain_weight)*criterion(reconstruction, phantom)
+            brain_weight = 0.99
+            loss = (1 - brain_weight) * criterion(reconstruction_patches, phantom_patches)
             if torch.any(brain_mask):
-                loss += brain_weight*criterion(reconstruction[brain_mask], phantom[brain_mask])
+                loss += brain_weight * criterion(reconstruction_patches[brain_mask_patches], phantom_patches[brain_mask_patches])
             loss.backward()
             optimizer.step()
             ema.update()
 
             train_loss += loss.item()
 
-
-        # report RMSE
+        # Report RMSE
         print(f'Epoch {epoch + 1}/{num_epochs}, Training RMSE (HU): {np.sqrt(train_loss / num_iterations_train)}')
 
         if val_loader:
@@ -298,23 +240,20 @@ def train_model(projector, reconstructor, train_loader, val_loader=None, num_epo
                         phantom, _ = next(val_loader_iter)
 
                     phantom = phantom.to(device).float()
-                    phantom[phantom < -1000.0] = -1000.0
 
                     brain_mask = torch.logical_and(phantom > 0.0, phantom < 80.0)
 
                     phantom = HU_to_attenuation(phantom)
 
-
                     if isinstance(projector, torch.nn.DataParallel):
                         sinogram = projector.module.forward_project(phantom)
                     else:
-                        sinogram = projector.forward_project(phantom)  # Updated to use class method
+                        sinogram = projector.forward_project(phantom)
                     
-                    I0 = 1e5
-                    photon_counts = I0 * torch.exp(-sinogram)
-                    photon_counts = torch.poisson(photon_counts)
-                    noisy_sinogram = -torch.log((photon_counts + 1) / I0)
-
+                    # I0 = 1e10
+                    # photon_counts = I0 * torch.exp(-sinogram)
+                    # photon_counts = torch.poisson(photon_counts)
+                    # noisy_sinogram = -torch.log((photon_counts + 1) / I0)
 
                     if isinstance(projector, torch.nn.DataParallel):
                         x_tilde_components = projector.module.pseudoinverse_reconstruction(sinogram, projector.module.singular_values_list)
@@ -322,30 +261,24 @@ def train_model(projector, reconstructor, train_loader, val_loader=None, num_epo
                         x_tilde_components = projector.pseudoinverse_reconstruction(sinogram, projector.singular_values_list)
                     
                     pseudoinverse = torch.sum(x_tilde_components, dim=1, keepdim=True)
-
-                    reconstruction = reconstructor(pseudoinverse)
+                    # reconstruction = reconstructor(pseudoinverse)
+                    reconstruction = reconstructor(phantom)
 
                     phantom = attenuation_to_HU(phantom)
                     reconstruction = attenuation_to_HU(reconstruction)
                     pseudoinverse = attenuation_to_HU(pseudoinverse)
 
-                    brain_weight = 0.95
-                    loss = (1-brain_weight)*criterion(reconstruction, phantom)
+                    brain_weight = 0.99
+                    loss = (1 - brain_weight) * criterion(reconstruction, phantom)
                     if torch.any(brain_mask):
-                        loss += brain_weight*criterion(reconstruction[brain_mask], phantom[brain_mask])
-                   
+                        loss += brain_weight * criterion(reconstruction[brain_mask], phantom[brain_mask])
+                    
                     val_loss += loss.item()
                     
             print(f'Validation RMSE (HU): {np.sqrt(val_loss / num_iterations_val)}')
 
-            # # Save the model after each epoch
-            save_reconstructor(reconstructor, 'weights/deep_learning_reconstructor.pth')
-
-    # Save the model after training
-    # torch.save(self.state_dict(), 'weights/deep_learning_reconstructor.pth')
-            # Save the optimizer state
-            torch.save(optimizer.state_dict(), 'weights/deep_learning_reconstructor_optimizer.pth')
-
+        # Save the model after each epoch
+        # save_reconstructor(reconstructor, 'weights/deep_learning_reconstructor.pth')
 
 def save_reconstructor(reconstructor, filename):
     if isinstance(reconstructor, torch.nn.DataParallel):
@@ -359,18 +292,116 @@ def load_reconstructor(reconstructor, filename):
     else:
         reconstructor.load_state_dict(torch.load(filename))
 
+# Add the evaluation function
+def evaluate_reconstructor(projector, reconstructor, test_loader, num_iterations=1, device=device):
+    reconstructor.eval()
+    test_loader_iter = iter(test_loader)
+    
+    # Create the figures directory if it doesn't exist
+    os.makedirs('figures', exist_ok=True)
+    
+    for i in tqdm(range(num_iterations)):
+        try:
+            phantom, _ = next(test_loader_iter)
+        except StopIteration:
+            test_loader_iter = iter(test_loader)
+            phantom, _ = next(test_loader_iter)
+        
+        phantom = phantom.to(device).float()
+
+        brain_mask = torch.logical_and(phantom > 0.0, phantom < 80.0)
+
+        phantom = HU_to_attenuation(phantom)
+
+        t0 = time.time()
+
+        # Simulate forward projection and sinogram with Poisson noise
+        # I0 = 1e10
+        # t0 = time.time()
+        sinogram = projector.forward_project(phantom)
+        # photon_counts = I0 * torch.exp(-sinogram)
+        # photon_counts = torch.poisson(photon_counts)
+        # sinogram_noisy = -torch.log((photon_counts + 1) / I0)
+
+        t1 = time.time()
+        print(f'Elapsed time to forward project = {t1 - t0:.4f}s')
+
+        # Pseudo-inverse reconstruction
+        t0 = time.time()
+        x_tilde_components = projector.pseudoinverse_reconstruction(sinogram, projector.singular_values_list)
+        pseudoinverse = torch.sum(x_tilde_components, dim=1, keepdim=True)
+        t1 = time.time()
+        print(f'Elapsed time to pseudo-inverse reconstruct = {t1 - t0:.4f}s')
+
+        # Deep Learning Reconstruction
+        t0 = time.time()
+        # reconstruction = reconstructor(phantom)
+        reconstruction = reconstructor(pseudoinverse)
+        t1 = time.time()
+        print(f'Elapsed time for deep learning reconstruction = {t1 - t0:.4f}s')
+
+        # Convert to HU units for visualization
+        phantom_HU = attenuation_to_HU(phantom)
+        pseudoinverse_HU = attenuation_to_HU(pseudoinverse)
+        reconstruction_HU = attenuation_to_HU(reconstruction)
+
+        # Save figures
+        plot_reconstructions(
+            vmin=0.0,
+            vmax=80.0,
+            filename=f'DLR_batch_{i}_brain.png',
+            phantom=phantom_HU,
+            sinogram=sinogram,
+            pinv_reconstruction=pseudoinverse_HU,
+            reconstruction=reconstruction_HU
+        )
+        plot_reconstructions(
+            vmin=-1000.0,
+            vmax=2000.0,
+            filename=f'DLR_batch_{i}_bone.png',
+            phantom=phantom_HU,
+            sinogram=sinogram,
+            pinv_reconstruction=pseudoinverse_HU,
+            reconstruction=reconstruction_HU
+        )
+
+def plot_reconstructions(vmin, vmax, filename, phantom, sinogram, pinv_reconstruction, reconstruction):
+    # This function is similar to the one in step4_iterative_reconstruction.py
+    plt.figure(figsize=(24, 6))
+    plt.subplot(1, 4, 1)
+    plt.imshow(phantom.cpu().numpy()[0, 0, :, :], cmap='gray', vmin=vmin, vmax=vmax)
+    plt.title('Phantom')
+    plt.axis('off')
+    plt.subplot(1, 4, 2)
+    plt.imshow(sinogram.cpu().numpy()[0, 0, :, :], cmap='gray')
+    plt.gca().set_aspect('auto')
+    plt.title('Sinogram')
+    plt.axis('off')
+    plt.subplot(1, 4, 3)
+    plt.imshow(pinv_reconstruction.detach().cpu().numpy()[0, 0, :, :], cmap='gray', vmin=vmin, vmax=vmax)
+    plt.title('Pseudo-inverse Reconstruction')
+    plt.axis('off')
+    plt.subplot(1, 4, 4)
+    plt.imshow(reconstruction.detach().cpu().numpy()[0, 0, :, :], cmap='gray', vmin=vmin, vmax=vmax)
+    plt.title('Deep Learning Reconstruction')
+    plt.axis('off')
+    plt.savefig(f'./figures/{filename}', dpi=300)
+    plt.close('all')
 
 # Main script
 def main():
 
-    train_flag = True
+    train_flag = True  # Set to True to enable training
+    evaluate_flag = True  # Set to True to run evaluation after training
     load_flag = True
-    multiGPU_flag = True
-    device_ids = [0,1,2,3]
-    batch_size = 8
-    num_epochs = 100
-    num_iterations_train = 30
-    num_iterations_val = 5
+    multiGPU_flag = False  # Set to True if using multiple GPUs
+    device_ids = [0,1,2]
+    batch_size = 4
+    num_epochs = 100  # Adjust as needed
+    num_iterations_train = 50
+    num_iterations_val = 1
+    num_iterations_test = 10  # Number of test images to process during evaluation
+    patch_size = 256
 
     from step0_common_info import dicom_dir
     
@@ -395,14 +426,13 @@ def main():
 
     sample_weights = compute_sample_weights(train_dataset.metadata, train_dataset.hemorrhage_types)
     train_sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(train_dataset), replacement=True)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler, num_workers=16)
 
     sample_weights = compute_sample_weights(val_dataset.metadata, val_dataset.hemorrhage_types)
     val_sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(val_dataset), replacement=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=val_sampler)
 
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
+    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=True)  # Batch size of 1 for evaluation
 
     projector = CTProjector().to(device)
     reconstructor = DeepLearningReconstructor().to(device)
@@ -411,34 +441,42 @@ def main():
         projector = torch.nn.DataParallel(projector, device_ids=device_ids)
         reconstructor = torch.nn.DataParallel(reconstructor, device_ids=device_ids)
 
-
     if load_flag:
         try:
-            # reconstructor.load_state_dict(torch.load('weights/deep_learning_reconstructor.pth'))
-            print("Model loaded successfully.")
+            print("Loading pre-trained reconstructor weights.")
             load_reconstructor(reconstructor, 'weights/deep_learning_reconstructor.pth')
+            print("Model loaded successfully.")
         except FileNotFoundError:
             print("No pre-trained model found. Starting from scratch.")
 
-
-    # reconstructor.unet = torch.nn.DataParallel(reconstructor.unet, device_ids=[1,2,3])
-    # reconstructor.U = torch.nn.DataParallel(reconstructor.U, device_ids=[1,2,3])
-    # reconstructor.S = torch.nn.DataParallel(reconstructor.S, device_ids=[1,2,3])
-    # reconstructor.V = torch.nn.DataParallel(reconstructor.V, device_ids=[1,2,3])
-
     if train_flag:
-        train_model(projector, 
-                    reconstructor, 
-                    train_loader, 
-                    val_loader=val_loader, 
-                    num_epochs=num_epochs, 
-                    num_iterations_train=num_iterations_train,
-                    num_iterations_val=num_iterations_val,
-                    lr=1e-4, 
-                    device='cuda')
+        train_model(
+            projector, 
+            reconstructor, 
+            train_loader, 
+            val_loader=None, 
+            num_epochs=num_epochs, 
+            num_iterations_train=num_iterations_train,
+            num_iterations_val=num_iterations_val,
+            lr=1e-4, 
+            patch_size = patch_size,
+            device=device
+        )
+
+        save_reconstructor(reconstructor, 'weights/deep_learning_reconstructor.pth')
+
+
+    if evaluate_flag:
+        # Evaluate the reconstructor
+        evaluate_reconstructor(
+            projector, 
+            reconstructor, 
+            test_loader, 
+            num_iterations=num_iterations_test, 
+            device=device
+        )
 
 if __name__ == "__main__":
     main()
-
 
 print(f"Time taken: {time.time() - t0:.2f} seconds")

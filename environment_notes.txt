@@ -4,5 +4,5 @@ conda install python=3.12 pip ffmpeg
 conda install nvidia/label/cuda-12.4.1::cuda-toolkit
 pip3 install numpy scipy matplotlib pandas scikit-learn scikit-image seaborn pydicom
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-pip3 install transformers diffusers 
+pip3 install transformers diffusers accelearate datasets
 pip3 install torch-ema
