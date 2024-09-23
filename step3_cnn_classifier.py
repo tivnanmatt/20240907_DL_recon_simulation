@@ -15,6 +15,19 @@ from itertools import combinations
 import pandas as pd
 from torch_ema import ExponentialMovingAverage
 
+# Get the 'tab20' colormap
+cmap = plt.get_cmap('tab20')
+
+# Extract even-indexed and odd-indexed colors
+colors_even = cmap.colors[::2]  # Get all even indices
+colors_odd = cmap.colors[1::2]  # Get all odd indices
+
+# Combine even and odd colors
+custom_colors = colors_even + colors_odd
+
+# Set the custom color cycle as the default
+plt.rcParams['axes.prop_cycle'] = plt.cycler(color=custom_colors)
+
 class SupervisedClassifier(nn.Module):
     def __init__(self):
         super(SupervisedClassifier, self).__init__()
@@ -46,9 +59,9 @@ class SupervisedClassifierObserver:
         self.batch_size = batch_size
         self.labels = ['no_hemorrhage', 'epidural', 'intraparenchymal', 'intraventricular', 'subarachnoid', 'subdural']
 
-    def train(self, train_loader, val_loader=None, verbose=False, num_epochs=20, num_iterations_train=100, num_iterations_val=10):
+    def train(self, train_loader, val_loader=None, test_loader=None, verbose=False, num_epochs=20, num_iterations_train=100, num_iterations_val=10, lr=2e-4):
         criterion = nn.CrossEntropyLoss()  # Loss function for multi-class classification
-        optimizer = optim.Adam(self.model.parameters(), lr=2e-4)  # Optimizer
+        optimizer = optim.Adam(self.model.parameters(), lr=lr)  # Optimizer
         ema = ExponentialMovingAverage(self.model.parameters(), decay=0.95)  # Exponential moving average for stabilizing training
 
         # Training loop
@@ -67,8 +80,16 @@ class SupervisedClassifierObserver:
                 images = images.to(self.device)
                 labels = labels.to(self.device)  # CrossEntropy expects LongTensor for labels
 
+                max_noise_std = 1000.0
+                noise_std = torch.rand(images.size(0), 1, 1, 1).to(images.device) * max_noise_std
+                noise = torch.randn_like(images) * noise_std
+
+                images_noisy = images + noise
+
+
                 optimizer.zero_grad()
-                outputs = self.model(images)
+                # outputs = self.model(images) # non-robust classifier
+                outputs = self.model(images_noisy) # robust classifier
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
@@ -85,6 +106,18 @@ class SupervisedClassifierObserver:
             # Save the trained model weights
             # torch.save(self.model.state_dict(), 'weights/supervised_classifier_resnet50_weights.pth')
             save_classifier(self.model, 'weights/supervised_classifier_resnet50_weights.pth')
+
+
+            if test_loader is not None:
+
+                print("Running evaluation...")
+                import time
+                t0 = time.time()
+
+                results = observer.evaluate(test_loader, num_patients=len(test_dataset))
+                observer.print_evaluation(results)
+
+                print("Time taken for evaluation:", time.time() - t0)
 
     def validate(self, val_loader, num_iterations_val=10):
         total_loss = 0.0
@@ -231,7 +264,7 @@ class SupervisedClassifierObserver:
         plt.ylabel('True Positive Rate')
         plt.title('One-vs-One ROC Curve')
         plt.legend(loc='best', fontsize=5.8)
-        plt.savefig('figures/ovo_auc_roc_{}.png'.format(batch_size))
+        plt.savefig('figures/ovo_auc_roc_{}.png'.format(batch_size), dpi=300)
         plt.close()
 
         # Save the results to a csv file
@@ -302,12 +335,13 @@ def load_classifier(model, path='weights/supervised_classifier_resnet50_weights.
 if __name__ == "__main__":
     train_flag = True
     load_flag = True
-    multiGPU_flag = False
+    multiGPU_flag = True
     device_ids = [0,1]
     batch_size = 128
-    num_epochs = 5
+    num_epochs = 100
     num_iterations_train = 10
     num_iterations_val = 1
+    lr = 1e-4
 
     from step0_common_info import dicom_dir
     
@@ -362,15 +396,9 @@ if __name__ == "__main__":
 
     if train_flag:
         # Train the model
-        observer.train(train_loader, val_loader=val_loader, num_epochs=num_epochs, num_iterations_train=num_iterations_train, num_iterations_val=num_iterations_val)
+        observer.train(train_loader, val_loader=val_loader, test_loader=test_loader, num_epochs=num_epochs, num_iterations_train=num_iterations_train, num_iterations_val=num_iterations_val, lr=lr)
 
-    import time
-    t0 = time.time()
-
-    results = observer.evaluate(test_loader, num_patients=len(test_dataset))
-    observer.print_evaluation(results)
-
-    print("Time taken for evaluation:", time.time() - t0)
+    
 
     # # Obtain classifier output for the test set
     # all_labels, all_predictions, all_probabilities = observer.get_classifier_output(test_loader)

@@ -1,4 +1,4 @@
-
+import os
 import torch
 import torch.nn as nn
 
@@ -9,6 +9,7 @@ from torch_ema import ExponentialMovingAverage
 from tqdm import tqdm
 
 from step2_dataset_dataloader import RSNA_Intracranial_Hemorrhage_Dataset
+from step0_common_info import dicom_dir
 
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler
@@ -20,6 +21,8 @@ import time
 
 import matplotlib.pyplot as plt
 
+import pydicom
+from pydicom.dataset import Dataset, FileDataset
 # make it so that device 3 is the only visible GPU
 # import os
 # os.environ["CUDA_VISIBLE_DEVICES"]="2"
@@ -66,9 +69,6 @@ def pinv_recon(sinogram, singular_values=None):
     S_UT_y = UT_y * invS
     x = torch.tensordot(V, S_UT_y, dims=1).view(batch_size, 1, 256, 256)
     return x
-
-
-
 
 class ReconstructionLossTerm(torch.nn.Module):
     def __init__(self):
@@ -268,41 +268,77 @@ def plot_reconstructions(vmin, vmax, filename, phantom, sinogram, pinv_reconstru
     reconstruction_quadratic = HU_to_attenuation(reconstruction_quadratic)
     reconstruction_huber = HU_to_attenuation(reconstruction_huber)
 
+def save_reconstruction_as_dicom(image, folder_path, filename):
+    """
+    Saves the given image as a DICOM file in the specified folder.
+    """
+    # Ensure the directory exists
+    os.makedirs(folder_path, exist_ok=True)
+    
+    # Create a basic DICOM dataset
+    ds = Dataset()
+    
+    # Convert the image to numpy array and then to pixel data
+    image_numpy = image.cpu().detach().numpy()
+    
+    # Set pixel data
+    ds.PixelData = image_numpy.tobytes()
+    
+    # Set the image shape as rows and columns
+    ds.Rows, ds.Columns = image_numpy.shape
+    
+    # Set the type of data (this can vary based on your image type)
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.BitsAllocated = 16
+    ds.BitsStored = 16
+    ds.HighBit = 15
+    ds.PixelRepresentation = 1  # signed integers
+    
+    # Save the dataset as a DICOM file
+    dicom_filename = os.path.join(folder_path, f"{filename}.dcm")
+    ds.save_as(dicom_filename)
+    print(f"DICOM saved at {dicom_filename}")
+
 def main():
     # Dataset paths
-    csv_file = 'data/stage_2_train_reformat.csv'
-    image_folder = '../../data/rsna-intracranial-hemorrhage-detection/stage_2_train/'
+    # csv_file = 'data/stage_2_train_reformat.csv'
+    # image_folder = '../../data/rsna-intracranial-hemorrhage-detection/stage_2_train/'
     
-    # Load the dataset
-    full_dataset = RSNA_Intracranial_Hemorrhage_Dataset(csv_file, image_folder)
+    # # Load the dataset
+    # full_dataset = RSNA_Intracranial_Hemorrhage_Dataset(csv_file, image_folder)
+
+    test_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
+            'data/metadata_evaluation.csv',
+            dicom_dir)
+    print('Test dataset size:', len(test_dataset))
 
     # Split dataset into train, validation, and test sets
-    dataset_size = len(full_dataset)
-    indices = list(range(dataset_size))
-    train_indices, temp_indices = train_test_split(indices, test_size=0.3, random_state=42)
-    val_indices, test_indices = train_test_split(temp_indices, test_size=0.5, random_state=42)
+    # dataset_size = len(full_dataset)
+    # indices = list(range(dataset_size))
+    # train_indices, temp_indices = train_test_split(indices, test_size=0.3, random_state=42)
+    # val_indices, test_indices = train_test_split(temp_indices, test_size=0.5, random_state=42)
 
-    train_dataset = Subset(full_dataset, train_indices)
-    val_dataset = Subset(full_dataset, val_indices)
-    test_dataset = Subset(full_dataset, test_indices)
+    # train_dataset = Subset(full_dataset, train_indices)
+    # val_dataset = Subset(full_dataset, val_indices)
+    # test_dataset = Subset(full_dataset, test_indices)
 
     # Dataloaders
     batch_size = 1
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
     num_iterations = 100
 
-    train_loader_iter = iter(train_loader)
+    test_loader_iter = iter(test_loader)
 
     # Simulate CT measurements and iterative reconstruction
     for i in tqdm(range(num_iterations)):
 
         try:
-            phantom, _ = next(train_loader_iter)
+            phantom, _ = next(test_loader_iter)
         except StopIteration:
-            train_loader_iter = iter(train_loader)
-            phantom, _ = next(train_loader_iter)
+            test_loader_iter = iter(test_loader)
+            phantom, _ = next(test_loader_iter)
 
         phantom = phantom.to(device).view(256,256).float()
         phantom[phantom < -1000.0] = -1000.0
@@ -360,6 +396,9 @@ def main():
         plot_reconstructions(0.0, 80.0, f'reconstructions_batch_{i}_brain.png', phantom, sinogram, pinv_reconstruction, reconstruction_quadratic, reconstruction_huber)
         plot_reconstructions(-200.0, 1000.0, f'reconstructions_batch_{i}_bone.png', phantom, sinogram, pinv_reconstruction, reconstruction_quadratic, reconstruction_huber)
 
+        save_reconstruction_as_dicom(pinv_reconstruction, './data/dicom_filtered_backprojection', f'recon_filtered_backprojection_batch_{i}')
+        save_reconstruction_as_dicom(reconstruction_quadratic, './data/dicom_quadratic_penalized', f'recon_quadratic_penalized_batch_{i}')
+        save_reconstruction_as_dicom(reconstruction_huber, './data/dicom_huber_penalized', f'recon_huber_penalized_batch_{i}')
         # if i == 1:  # limit to 2 batches for demonstration
         #     break
 

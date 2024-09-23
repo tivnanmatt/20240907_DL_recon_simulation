@@ -2,3 +2,4 @@ __pycache__
 nohup.out
 tmp.png
 tmp*
+train_cnn_forever.py
