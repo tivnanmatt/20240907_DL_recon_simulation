@@ -290,7 +290,7 @@ def load_reconstructor(reconstructor, filename):
     if isinstance(reconstructor, torch.nn.DataParallel):
         reconstructor.module.load_state_dict(torch.load(filename))
     else:
-        reconstructor.load_state_dict(torch.load(filename))
+        reconstructor.load_state_dict(torch.load(filename, map_location=torch.device('cpu')))
 
 # Add the evaluation function
 def evaluate_reconstructor(projector, reconstructor, test_loader, num_iterations=1, device=device):

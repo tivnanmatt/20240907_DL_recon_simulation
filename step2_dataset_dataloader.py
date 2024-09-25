@@ -6,7 +6,7 @@ import pydicom
 from step0_common_info import dataset_dir, dicom_dir
 
 class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
-    def __init__(self, csv_file, dicom_dir=None, transform=None, patch_size=None):
+    def __init__(self, csv_file, dicom_dir=None, transform=None, patch_size=None, expected_size=512):
 
         if dicom_dir is None:
             dicom_dir = dataset_dir + '/stage_2_train'
@@ -19,6 +19,7 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
         # self.metadata['no_hemorrhage'] = (self.metadata['any'] == 0).astype(int)
         # Remove all images classified with multiple hemorrhage types
         # self.metadata = self.metadata[self.metadata[self.hemorrhage_types].sum(axis=1) <= 1].reset_index(drop=True)
+        self.expected_size = expected_size
 
         self.patch_size = patch_size
 
@@ -71,12 +72,20 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
             image = torch.tensor(image).float()
             image.unsqueeze_(0)  # Add a channel dimension
 
-        # Handle cases where image is not 512x512
-        if image.shape[1] != 512 or image.shape[2] != 512:
-            return self.__getitem__(idx+1)
+        # Handle cases where image is not the expected size
+        if self.expected_size == 512 and (image.shape[1] != 512 or image.shape[2] != 512):
+            # Handle this case more gracefully, e.g., by skipping or logging
+            return self.__getitem__((idx + 1) % len(self.metadata))
         
-        # now do a 2x2 mean pooling to downsample the image to 256x256
-        image = torch.nn.functional.avg_pool2d(image, kernel_size=2)
+        if self.expected_size == 256 and (image.shape[1] != 256 or image.shape[2] != 256):
+            # Handle size check for reconstructed images
+            raise ValueError(f"Image at index {idx} is not 256x256")
+        
+        # Now perform downsampling if the expected size is 512
+        if self.expected_size == 512:
+            image = torch.nn.functional.avg_pool2d(image, kernel_size=2)
+            image = torch.clip(image, -1000, 2000)
+        
 
         # clip to -1000 to 2000
         image = torch.clip(image, -1000, 2000)
