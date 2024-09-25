@@ -81,7 +81,7 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
         # clip to -1000 to 2000
         image = torch.clip(image, -1000, 2000)
 
-        if self.patch_size:
+        if self.patch_size and self.patch_size < 256:
             # Randomly crop the image to the patch size
             x = np.random.randint(0, 256 - self.patch_size)
             y = np.random.randint(0, 256 - self.patch_size)

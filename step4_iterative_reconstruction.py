@@ -25,14 +25,19 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class CTProjector(nn.Module):
     def __init__(self):
         super(CTProjector, self).__init__()
-        self.U = torch.load('weights/U.pt')
-        self.S = torch.load('weights/S.pt')
-        self.V = torch.load('weights/V.pt')
+        U = torch.load('weights/U.pt')
+        S = torch.load('weights/S.pt')
+        V = torch.load('weights/V.pt')
+
+        # register these as buffers
+        self.register_buffer('U', U)
+        self.register_buffer('S', S)
+        self.register_buffer('V', V)
 
         # Ensure U, S, V are loaded on the correct device (e.g., GPU or CPU)
-        self.U = self.U.to(device)
-        self.S = self.S.to(device)
-        self.V = self.V.to(device)
+        # self.U = self.U.to(device)
+        # self.S = self.S.to(device)
+        # self.V = self.V.to(device)
 
         # Make sure they are not trainable
         self.U.requires_grad = False
@@ -46,11 +51,11 @@ class CTProjector(nn.Module):
 
         self.singular_values_list = torch.linspace(0, index_min_singular_value, 33)[1:].to(torch.int32)
 
-    def to(self, device):
-        self.U = self.U.to(device)
-        self.S = self.S.to(device)
-        self.V = self.V.to(device)
-        return super(CTProjector, self).to(device)
+    # def to(self, device):
+    #     self.U = self.U.to(device)
+    #     self.S = self.S.to(device)
+    #     self.V = self.V.to(device)
+    #     return super(CTProjector, self).to(device)
 
     def forward_project(self, image):
         """
