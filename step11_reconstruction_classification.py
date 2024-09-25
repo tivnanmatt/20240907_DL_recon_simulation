@@ -1,4 +1,4 @@
-# NOT WORKING YET
+# NOT WORKING YET, but not seeing it right now
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -11,14 +11,25 @@ from step0_common_info import dataset_dir
 from pydicom import dcmread
 from PIL import Image
 import numpy as np
+from torchvision.transforms import ToTensor
 from sklearn.preprocessing import label_binarize
 
 class DicomDataset(Dataset):
     """Custom Dataset for loading DICOM files."""
-    def __init__(self, folder_path, transform=None):
+    def __init__(self, folder_path, labels_csv=None, transform=None):
         self.folder_path = folder_path
         self.transform = transform
         self.dicom_files = [f for f in os.listdir(folder_path) if f.endswith('.dcm')]
+
+        # Load labels if provided
+        self.labels = self.load_labels(labels_csv) if labels_csv else [0] * len(self.dicom_files)
+
+    def load_labels(self, labels_csv):
+        """Load labels from a CSV file."""
+        df = pd.read_csv(labels_csv)
+        file_labels = dict(zip(df['filename'], df['label']))  # Adjust based on your CSV structure
+        labels = [file_labels.get(f, 0) for f in self.dicom_files]  # Default to 0 if file not found
+        return labels
 
     def __len__(self):
         return len(self.dicom_files)
@@ -27,38 +38,38 @@ class DicomDataset(Dataset):
         dicom_file = self.dicom_files[idx]
         dicom_path = os.path.join(self.folder_path, dicom_file)
 
-        # Read DICOM file
         dicom_data = dcmread(dicom_path)
 
-        # Check if DICOM metadata has the wrong image size and fix it
         if dicom_data.Rows != 256 or dicom_data.Columns != 256:
-            print(f"Fixing DICOM header for {dicom_file}: changing Rows and Columns to 256.")
             dicom_data.Rows = 256
             dicom_data.Columns = 256
 
-        # Ensure that the number of bytes matches the expected pixel size (256x256)
         expected_pixel_bytes = 256 * 256 * dicom_data.BitsAllocated // 8
         actual_pixel_bytes = len(dicom_data.PixelData)
         if actual_pixel_bytes != expected_pixel_bytes:
             raise ValueError(f"Pixel data size mismatch for {dicom_file}: "
-                             f"{actual_pixel_bytes} vs {expected_pixel_bytes} bytes.")
+                            f"{actual_pixel_bytes} vs {expected_pixel_bytes} bytes.")
 
-        # Now safely access the pixel array
         image = dicom_data.pixel_array
-        image = Image.fromarray(image).convert("L")  # Convert to grayscale PIL image
-        
-        # Apply transformations if specified
+        if isinstance(image, np.ndarray):
+            image = Image.fromarray(image).convert("L")
+
+        # Debugging print statements
+        print(f"Type of image before transformation: {type(image)}")
+
         if self.transform:
             image = self.transform(image)
+            print(f"Type of image after transformation: {type(image)}")
 
-        # TODO: Assign label based on your logic
-        # Placeholder label: you need to replace this with your actual label logic
-        label = 0  # Replace with actual label logic (e.g., using a CSV or file name)
+        if image.ndimension() == 3 and image.shape[0] != 1:
+            image = image.unsqueeze(0)
+
+        label = torch.tensor(self.labels[idx], dtype=torch.long)
 
         return image, label
 
 class EvaluationScript:
-    def __init__(self, model_path, batch_size=32, results_dir='results'):
+    def __init__(self, model_path, csv_file, batch_size=32, results_dir='results'):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.observer = SupervisedClassifierObserver(batch_size=batch_size)
         
@@ -72,14 +83,20 @@ class EvaluationScript:
         if not os.path.exists(self.results_dir):
             os.makedirs(self.results_dir)
 
+        self.csv_file = csv_file
+
     def prepare_dataloader(self, folder_path):
-        """Prepare a DataLoader for the DICOM dataset."""
+        """Prepare a DataLoader for the dataset in the specified folder."""
         transform = transforms.Compose([
             transforms.Resize((256, 256)),  # Resize to the expected input size for the network
             transforms.ToTensor()
         ])
         
-        dataset = DicomDataset(folder_path=folder_path, transform=transform)
+        dataset = RSNA_Intracranial_Hemorrhage_Dataset(
+            csv_file=self.csv_file,
+            dicom_dir=folder_path,
+            transform=transform
+        )
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
         return loader
 
@@ -95,50 +112,60 @@ class EvaluationScript:
         ground_truths = np.array(ground_truths)
         predictions = np.array(predictions)
 
-        # Ensure ground_truths are in one-hot encoded format if necessary
+        # Ensure ground_truths are in one-hot encoded format
         if ground_truths.ndim == 1:
-            num_classes = np.max(ground_truths) + 1
+            num_classes = 6  # Adjust based on the number of classes
             ground_truths_bin = label_binarize(ground_truths, classes=np.arange(num_classes))
         else:
             ground_truths_bin = ground_truths
 
-        # Check if predictions are probabilities
+        # Ensure predictions are probabilities
         if predictions.ndim == 1:
-            raise ValueError("Predictions should be probabilities, not class labels")
-        
-        # Save AUC results
+            num_classes = 6  # Adjust based on the number of classes
+            predictions_prob = np.zeros((len(predictions), num_classes))
+            for i, pred in enumerate(predictions):
+                predictions_prob[i, pred] = 1
+            predictions = predictions_prob
+        else:
+            # Predictions are already probabilities
+            predictions = torch.tensor(predictions)
+            predictions = F.softmax(predictions, dim=1).numpy()
+
+        print(f'Evaluation Results for {folder_name}:')
+        print(f'Accuracy: {accuracy * 100:.2f}%')
+
+        # Save results to files
         ovr_auc_results = self.observer.compute_ovr_auc(ground_truths_bin, predictions)
         ovo_auc_results = self.observer.compute_ovo_auc(ground_truths_bin, predictions)
 
-        # Save One-vs-Rest AUC results
         ovr_auc_df = pd.DataFrame(ovr_auc_results.items(), columns=['Hemorrhage Type', 'AUC'])
         ovr_auc_df.to_csv(os.path.join(self.results_dir, f'{folder_name}_ovr_auc.csv'), index=False)
 
-        # Save One-vs-One AUC results
         ovo_auc_df = pd.DataFrame(ovo_auc_results.items(), columns=['Hemorrhage Type Pair', 'AUC'])
         ovo_auc_df.to_csv(os.path.join(self.results_dir, f'{folder_name}_ovo_auc.csv'), index=False)
 
         print(f'Results saved for {folder_name}.')
 
     def evaluate_folder(self, folder_path):
-        """Evaluate model on DICOM images from a folder and save results."""
+        """Evaluate model on images from a specific folder and save results."""
         folder_name = os.path.basename(folder_path)
         loader = self.prepare_dataloader(folder_path)
         accuracy, ground_truths, predictions = self.observer.evaluate(loader)
 
         # Ensure predictions are in the correct format
-        predictions = np.array(predictions)
-        if predictions.ndim == 1 or predictions.shape[1] != len(np.unique(ground_truths)):
-            # Assuming predictions are class labels and need to be converted to probabilities
-            num_classes = len(np.unique(ground_truths))
+        predictions = np.array(predictions)  # Ensure predictions is a numpy array
+
+        # Check dimensions to decide how to handle the predictions
+        if predictions.ndim == 1:  # If predictions are class indices
+            num_classes = 6
             predictions_prob = np.zeros((len(predictions), num_classes))
             for i, pred in enumerate(predictions):
-                predictions_prob[i, pred] = 1  # Dummy conversion, adjust based on actual model output
+                predictions_prob[i, pred] = 1
             predictions = predictions_prob
+        elif predictions.ndim == 2 and predictions.shape[1] == num_classes:  # If already probabilities
+            predictions = predictions  # No change needed
         else:
-            # Predictions are already probabilities
-            predictions = torch.tensor(predictions)
-            predictions = torch.nn.functional.softmax(predictions, dim=1).numpy()
+            raise ValueError("Unexpected shape of predictions array")
 
         print(f'Evaluation Results for {folder_path}:')
         print(f'Accuracy: {accuracy * 100:.2f}%')
@@ -147,14 +174,15 @@ class EvaluationScript:
         self.save_results(folder_name, accuracy, ground_truths, predictions)
 
 if __name__ == "__main__":
-    # Define paths to the DICOM folders and the model
+    # Define paths to the CSV file, model, and dataset folders
     model_path = 'weights/supervised_classifier_resnet50_weights.pth'
+    csv_file = 'data/metadata_evaluation.csv'
     folder_paths = ['data/DLR_reconstructions', 'data/FBP_reconstructions', 'data/MBIR_reconstructions']
 
     # Initialize evaluation script
-    evaluator = EvaluationScript(model_path=model_path, batch_size=32, results_dir='results')
+    evaluator = EvaluationScript(model_path=model_path, csv_file=csv_file, batch_size=32, results_dir='results')
     
     # Loop through each folder and evaluate
     for folder in folder_paths:
-        print(f"Evaluating DICOM images in {folder}...")
+        print(f"Evaluating images in {folder}...")
         evaluator.evaluate_folder(folder)
