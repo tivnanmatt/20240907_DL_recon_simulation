@@ -186,6 +186,98 @@ class ImageQualityAnalysis:
             df.to_csv(os.path.join(csv_dir, f'{key}_metrics.csv'), index=False)
             print(f"Metrics saved to {key}_metrics.csv")
 
+    def calculate_average_metrics(self):
+        """
+        Calculate average RMSE, SSIM, and PSNR per reconstruction type,
+        ignoring rows with infinite PSNR values, and average per class.
+        """
+        averages_per_reconstruction = {}
+        averages_per_class = {}
+
+        for key, metric_data in self.metrics_per_reconstruction.items():
+            print(f"Calculating averages for {key} dataset...")
+
+            # Filter out infinite PSNR values for PSNR calculations only
+            valid_psnr_brain = np.isfinite(metric_data['PSNR_brain'])
+            valid_psnr_bone = np.isfinite(metric_data['PSNR_bone'])
+            
+            # Filter only PSNR values based on valid PSNR values
+            filtered_psnr_brain = metric_data['PSNR_brain'][valid_psnr_brain]
+            filtered_psnr_bone = metric_data['PSNR_bone'][valid_psnr_bone]
+
+            # Keep RMSE and SSIM as they are without filtering
+            rmse_brain = metric_data['RMSE_brain']
+            ssim_brain = metric_data['SSIM_brain']
+            rmse_bone = metric_data['RMSE_bone']
+            ssim_bone = metric_data['SSIM_bone']
+
+            # Calculate averages for each reconstruction type
+            averages_per_reconstruction[key] = {
+                'Avg_RMSE_brain': np.mean(rmse_brain),
+                'Avg_SSIM_brain': np.mean(ssim_brain),
+                'Avg_PSNR_brain': np.mean(filtered_psnr_brain),
+                'Avg_RMSE_bone': np.mean(rmse_bone),
+                'Avg_SSIM_bone': np.mean(ssim_bone),
+                'Avg_PSNR_bone': np.mean(filtered_psnr_bone)
+            }
+
+            # Now calculate averages per class (label)
+            unique_labels = np.unique(self.labels)
+            averages_per_class[key] = {}
+
+            for label in unique_labels:
+                # Get indices where the labels match the current label
+                class_indices = np.where(np.array(self.labels) == label)[0]
+
+                # Brain metrics for the current class
+                class_rmse_brain = rmse_brain[class_indices]
+                class_ssim_brain = ssim_brain[class_indices]
+                
+                # Bone metrics for the current class
+                class_rmse_bone = rmse_bone[class_indices]
+                class_ssim_bone = ssim_bone[class_indices]
+
+                # Filter PSNR indices only where valid PSNR exists
+                class_psnr_brain_indices = class_indices[valid_psnr_brain[class_indices]]
+                class_psnr_bone_indices = class_indices[valid_psnr_bone[class_indices]]
+
+                # Get PSNR values for the current class using valid PSNR indices
+                class_psnr_brain = filtered_psnr_brain[np.isin(np.arange(len(filtered_psnr_brain)), class_psnr_brain_indices)]
+                class_psnr_bone = filtered_psnr_bone[np.isin(np.arange(len(filtered_psnr_bone)), class_psnr_bone_indices)]
+
+                # Store the averages per class
+                averages_per_class[key][f'Label_{label}'] = {
+                    'Avg_RMSE_brain': np.mean(class_rmse_brain),
+                    'Avg_SSIM_brain': np.mean(class_ssim_brain),
+                    'Avg_PSNR_brain': np.mean(class_psnr_brain) if len(class_psnr_brain) > 0 else None,
+                    'Avg_RMSE_bone': np.mean(class_rmse_bone),
+                    'Avg_SSIM_bone': np.mean(class_ssim_bone),
+                    'Avg_PSNR_bone': np.mean(class_psnr_bone) if len(class_psnr_bone) > 0 else None
+                }
+
+        return averages_per_reconstruction, averages_per_class
+
+    def save_averages_to_csv(self, csv_dir):
+        """
+        Save the average RMSE, SSIM, and PSNR per reconstruction and per class to CSV.
+        """
+        print(f"Saving average metrics to CSV files in {csv_dir}...")
+        if not os.path.exists(csv_dir):
+            os.makedirs(csv_dir)
+
+        averages_per_reconstruction, averages_per_class = self.calculate_average_metrics()
+
+        # Save averages per reconstruction type
+        df_reconstruction = pd.DataFrame(averages_per_reconstruction).T
+        df_reconstruction.to_csv(os.path.join(csv_dir, 'average_metrics_per_reconstruction.csv'), index=True)
+        print(f"Averages per reconstruction type saved to 'average_metrics_per_reconstruction.csv'")
+
+        # Save averages per class
+        for key, class_averages in averages_per_class.items():
+            df_class = pd.DataFrame(class_averages).T
+            df_class.to_csv(os.path.join(csv_dir, f'{key}_average_metrics_per_class.csv'), index=True)
+            print(f"Averages per class saved for {key} to '{key}_average_metrics_per_class.csv'")
+
     def __call__(self):
         """
         Allows the class to be called as a function to return the metrics dictionary.
@@ -221,7 +313,11 @@ if __name__ == '__main__':
     # Save metrics to CSV
     analysis.save_metrics_to_csv('image_quality_metrics')
 
+    # Plot images with infinite PSNR
     analysis.plot_inf_psnr_images('images_with_inf_psnr')
+
+    # Save average metrics to CSV
+    analysis.save_averages_to_csv('average_metrics')
 
     # Print metrics (optional)
     metrics = analysis()
