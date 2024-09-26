@@ -360,9 +360,9 @@ if __name__ == "__main__":
             dicom_dir)
     print('Test dataset size:', len(test_dataset))
 
-    print("Train class distribution:", train_dataset.metadata['subdural'].sum())
-    print("Val class distribution:", val_dataset.metadata['subdural'].sum())
-    print("Test class distribution:", test_dataset.metadata['subdural'].sum())
+    # print("Train class distribution:", train_dataset.metadata['subdural'].sum())
+    # print("Val class distribution:", val_dataset.metadata['subdural'].sum())
+    # print("Test class distribution:", test_dataset.metadata['subdural'].sum())
 
     def compute_sample_weights(metadata, hemorrhage_types):
         class_counts = metadata[hemorrhage_types].sum(axis=0).to_numpy()
