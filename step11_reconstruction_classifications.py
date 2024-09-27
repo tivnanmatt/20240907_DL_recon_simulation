@@ -78,28 +78,43 @@ def compute_ovo_auc(ground_truths, predictions, labels, dataset_name):
     df.to_csv(f'results/ovo_auc_{dataset_name}.csv', index=False)
     print(f"One-vs-One AUC results saved to 'results/ovo_auc_{dataset_name}.csv'")
 
-def plot_confusion_matrix(ground_truths, predictions, labels, dataset_name):
+def plot_confusion_matrix(ground_truths, predictions, labels, dataset_name, normalize=True):
     ground_truths_bin = np.argmax(ground_truths, axis=1)
     predicted_labels = np.argmax(predictions, axis=1)
     
-    cm = confusion_matrix(ground_truths_bin, predicted_labels)
+    cm = confusion_matrix(ground_truths_bin, predicted_labels, normalize='true' if normalize else None)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
 
-    plt.xticks(rotation=45, ha='right')  # Rotate the x-axis labels by 45 degrees
-    # plt.yticks(rotation=0)
+    plt.figure(figsize=(12, 12))
+    disp.plot(cmap=plt.cm.OrRd, values_format='.2f' if normalize else 'd')  # Format to two decimal places for normalized
+
+    # Rotate and align x-axis labels for better readability
+    plt.xticks(rotation=45, ha='right')  # Rotate the x-axis labels by 45 degrees, aligned right
+
+    # Add title
+    plt.title(f'{"Normalized " if normalize else ""}Confusion Matrix for {dataset_name}')
+
+    # Adjust layout to ensure everything fits
+    plt.tight_layout()
     
-    plt.figure(figsize=(10, 10))
-    disp.plot(cmap=plt.cm.OrRd, values_format='d')
-    plt.title(f'Confusion Matrix for {dataset_name}')
+    # Save the confusion matrix plot
     plt.savefig(f'figures/confusion_matrix_{dataset_name}.png', dpi=300)
     plt.close()
-    print(f"Confusion matrix for {dataset_name} saved to 'figures/confusion_matrix_{dataset_name}.png'")
+    
+    print(f'Confusion matrix for {dataset_name} saved to "figures/confusion_matrix_{dataset_name}.png"')
 
 def evaluate_reconstructed_datasets(observer, dicom_dirs, csv_file, batch_size=128):
     results = {}
     for dataset_name, dicom_dir in dicom_dirs.items():
         print(f"Loading dataset: {dataset_name} from {dicom_dir}")
-        dataset = RSNA_Intracranial_Hemorrhage_Dataset(csv_file, dicom_dir, expected_size=256)
+        
+        # Conditional check for setting expected_size
+        if dataset_name == 'Original_dataset':
+            expected_size = 512  # For the original dataset
+        else:
+            expected_size = 256  # For the reconstructed datasets
+
+        dataset = RSNA_Intracranial_Hemorrhage_Dataset(csv_file, dicom_dir, expected_size=expected_size)
         data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
         
         print(f"Evaluating {dataset_name} dataset...")
@@ -131,7 +146,8 @@ if __name__ == "__main__":
     dicom_dirs = {
         'FBP_reconstructions': 'data/FBP_reconstructions',
         'MBIR_reconstructions': 'data/MBIR_reconstructions',
-        'DLR_reconstructions': 'data/DLR_reconstructions'
+        'DLR_reconstructions': 'data/DLR_reconstructions',
+        'Original_dataset': dicom_dir  # Add the original dataset directory
     }
 
     observer = SupervisedClassifierObserver(verbose=True, batch_size=batch_size)
@@ -146,4 +162,3 @@ if __name__ == "__main__":
         print("Weights file not found. Please ensure the model is trained and weights are saved.")
 
     results = evaluate_reconstructed_datasets(observer, dicom_dirs, csv_file, batch_size=batch_size)
-
