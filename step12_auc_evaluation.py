@@ -83,7 +83,7 @@ def plot_grouped_bar_auc_ovo(auc_data):
     plt.ylabel('AUC Score')
     plt.legend(title='Reconstruction Type', title_fontsize='13', fontsize='11')
     plt.xticks(rotation=45)  # Rotate x-axis labels for better readability
-    plt.ylim(0, 1)  # AUC scores are between 0 and 1
+    plt.ylim(0.6, 1)  # AUC scores are between 0 and 1
     
     plt.savefig('figures/ovr_auc_grouped_bar_charts_by_label.png', dpi=300)
     plt.show()

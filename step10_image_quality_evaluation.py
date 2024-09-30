@@ -28,42 +28,48 @@ def plot_histograms(metrics, output_dir):
     for recon_type, data in metrics.items():
         plt.figure(figsize=(18, 5))
 
-        # Filter out infinite PSNR values
-        psnr_brain = data['PSNR_brain'].replace([np.inf, -np.inf], np.nan).dropna()
-        psnr_bone = data['PSNR_bone'].replace([np.inf, -np.inf], np.nan).dropna()
+        # Filter out infinite values
+        initial_count = len(data)
+        data = data.replace([np.inf, -np.inf], np.nan).dropna()
+        final_count = len(data)
+        print(f"Data for {recon_type} after filtering: {initial_count - final_count} rows dropped.")
 
-        # Plot RMSE histogram
-        plt.subplot(1, 3, 1)
-        plt.hist(data['RMSE_brain'], bins=50, alpha=0.7, label='Brain Window')
-        plt.hist(data['RMSE_bone'], bins=50, alpha=0.7, label='Bone Window')
-        plt.title(f'{recon_type} RMSE Histogram')
-        plt.xlabel('RMSE')
-        plt.ylabel('Frequency')
-        plt.legend()
+        # Adjust spacing between subplots
+        plt.subplots_adjust(wspace=0.4)  # Increase horizontal space between subplots
 
         # Plot PSNR histogram
-        plt.subplot(1, 3, 2)
-        plt.hist(psnr_brain, bins=50, alpha=0.7, label='Brain Window')
-        plt.hist(psnr_bone, bins=50, alpha=0.7, label='Bone Window')
-        plt.title(f'{recon_type} PSNR Histogram')
-        plt.xlabel('PSNR')
-        plt.ylabel('Frequency')
-        plt.legend()
+        plt.subplot(1, 2, 1)
+        ax1 = plt.gca()
+        ax1.hist(data['PSNR_brain'], bins=50, alpha=0.7, label='Brain Window')
+        ax1.hist(data['PSNR_bone'], bins=50, alpha=0.7, label='Bone Window')
 
+        # Combine legends
+        ax1.legend(loc='upper right')
+
+        ax1.set_title(f'{recon_type} PSNR Histogram')
+        ax1.set_xlabel('PSNR')
+        ax1.set_ylabel('Frequency')
+        
         # Plot SSIM histogram
-        plt.subplot(1, 3, 3)
-        plt.hist(data['SSIM_brain'], bins=50, alpha=0.7, label='Brain Window')
-        plt.hist(data['SSIM_bone'], bins=50, alpha=0.7, label='Bone Window')
-        plt.title(f'{recon_type} SSIM Histogram')
-        plt.xlabel('SSIM')
-        plt.ylabel('Frequency')
-        plt.legend()
+        plt.subplot(1, 2, 2)
+        ax3 = plt.gca()
+        ax3.hist(data['SSIM_brain'], bins=50, alpha=0.7, label='Brain Window')
+        ax3.hist(data['SSIM_bone'], bins=50, alpha=0.7, label='Bone Window')
+
+        # Combine legends
+        ax3.legend(loc='upper right')
+
+        ax3.set_title(f'{recon_type} SSIM Histogram')
+        ax3.set_ylim(0, 100)
+        ax3.set_xlabel('SSIM')
+        ax3.set_ylabel('Frequency')
 
         # Save the figure
         save_path = os.path.join(output_dir, f'{recon_type}_histograms.png')
         plt.savefig(save_path)
         plt.close()
         print(f"Saved histograms to {save_path}")
+
 
 def prepare_data_for_violin(metrics):
     """
@@ -115,7 +121,7 @@ def plot_violin_plots(combined_data, output_dir):
 if __name__ == '__main__':
     # Define the directories
     metrics_csv_dir = 'image_quality_metrics'  # Directory where metrics CSV files are saved
-    violin_plots_output_dir = 'data/violin_plots'   # Directory to save violin plots
+    violin_plots_output_dir = 'figures/violin_plots'   # Directory to save violin plots
     histograms_output_dir = 'figures/histograms' 
 
     # Define reconstruction types

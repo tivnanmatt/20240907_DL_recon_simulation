@@ -12,18 +12,20 @@ from step0_common_info import dataset_dir, dicom_dir
 import matplotlib.pyplot as plt
 
 class ImageQualityAnalysis:
-    def __init__(self, original_dataset, reconstructed_datasets, max_pixel_value=255):
+    def __init__(self, original_dataset, reconstructed_datasets):
         """
         Initialize with original and reconstructed datasets. Ensure all datasets are compatible.
         """
         print('Initializing Image Quality Analysis...')
         self.original_dataset = original_dataset
         self.reconstructed_datasets = reconstructed_datasets
-        self.max_pixel_value = max_pixel_value
+
 
         # Define intensity windows
         self.brain_window = (0.0, 80.0)
-        self.bone_window = (0, 255)
+        self.bone_window = (-1000, 2000)
+        self.max_pixel_value_brain = 80
+        self.max_pixel_value_bone = 3000
 
         self.inf_psnr_indices = []
         self.inf_psnr_images = []
@@ -89,33 +91,33 @@ class ImageQualityAnalysis:
                 resampled_brain = self.apply_window(resampled_image, *self.brain_window)
                 original_bone = self.apply_window(original_image, *self.bone_window)
                 resampled_bone = self.apply_window(resampled_image, *self.bone_window)
-                
+
+
                 # Calculate metrics for brain window
                 rmse_brain = np.sqrt(np.mean((original_brain - resampled_brain) ** 2))
                 rmse_values_brain.append(rmse_brain)
+                normalized_original_bone = (original_bone + 1000) / 3000.0
+                normalized_resampled_bone = (resampled_bone + 1000) / 3000.0
                 
-                ssim_brain = ssim(original_brain, resampled_brain, data_range=1.0)
+                # Normalize the values to [0, 1]
+                normalized_original_brain = original_brain / 80.0
+                normalized_resampled_brain = resampled_brain / 80.0
+
+                ssim_brain = ssim(normalized_original_brain, normalized_resampled_brain, data_range=1.0)
                 ssim_values_brain.append(ssim_brain)
-                
-                mse_brain = np.mean((original_brain - resampled_brain) ** 2)
-                psnr_brain = 10 * np.log10((self.max_pixel_value ** 2) / mse_brain) if mse_brain > 0 else float('inf')
-                
-                # Check for infinite PSNR values
-                if psnr_brain == float('inf'):
-                    self.inf_psnr_indices.append(i)
-                    self.inf_psnr_images.append((original_brain, original_bone, resampled_brain, resampled_bone))
-                
+
+                psnr_brain = (self.max_pixel_value_brain) / (rmse_brain + 0.01*self.max_pixel_value_brain) 
                 psnr_values_brain.append(psnr_brain)
                 
                 # Calculate metrics for bone window
                 rmse_bone = np.sqrt(np.mean((original_bone - resampled_bone) ** 2))
                 rmse_values_bone.append(rmse_bone)
                 
-                ssim_bone = ssim(original_bone, resampled_bone, data_range=1)
+                ssim_bone = ssim(normalized_original_bone, normalized_resampled_bone, data_range=1)
                 ssim_values_bone.append(ssim_bone)
                 
-                mse_bone = np.mean((original_bone - resampled_bone) ** 2)
-                psnr_bone = 10 * np.log10((self.max_pixel_value ** 2) / mse_bone) if mse_bone > 0 else float('inf')
+
+                psnr_bone = self.max_pixel_value_bone / (rmse_bone + 0.01*self.max_pixel_value_bone)
                 psnr_values_bone.append(psnr_bone)
             
             print(f"Metrics calculated for {key} dataset.")
@@ -285,7 +287,6 @@ class ImageQualityAnalysis:
         return self.metrics_per_reconstruction
 
 if __name__ == '__main__':
-    # Define paths to the datasets
     original_csv_file = 'data/metadata_evaluation.csv'
     original_dicom_dir = dicom_dir
 
