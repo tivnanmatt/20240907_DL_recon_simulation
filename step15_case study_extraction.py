@@ -55,48 +55,100 @@ def identify_cases(ground_truths, fbp_predictions, mbir_predictions, dlr_predict
 
     return fbp_correct_not_mbri_dlri, mbir_correct_not_fbpi_dlri, dlri_correct_not_fbpi_mbri
 
-def plot_cases(indices, original_dataset, fbp_dataset, mbir_dataset, dlr_dataset, fbp_predictions, mbir_predictions, dlr_predictions, true_labels, title_prefix):
+def apply_window(image, window_min, window_max):
+    """
+    Apply a window to an image.
+    """
+    return np.clip(image, window_min, window_max)
+
+def plot_cases(indices, original_dataset, fbp_dataset, mbir_dataset, dlr_dataset, 
+               fbp_predictions, mbir_predictions, dlr_predictions, true_labels, title_prefix):
     for idx in indices:
-        plt.figure(figsize=(16, 10))
+        plt.figure(figsize=(16, 10), facecolor='black')  # Set background color to black
 
-        # Original image with true label
-        original_image = original_dataset[idx][0].numpy().squeeze()  # Load original image
+        # Set the window parameters
+        brain_window = (0.0, 80.0)
+        bone_window = (-1000, 2000)
+
+        # Original image with true label (Brain)
+        plt.subplot(2, 4, 1)
+        original_image = original_dataset[idx][0].numpy().squeeze()
+        original_image_brain = apply_window(original_image, *brain_window)
+        plt.imshow(original_image_brain, cmap='gray', vmin=brain_window[0], vmax=brain_window[1])
         true_label = np.argmax(true_labels[idx])
-        plt.subplot(1, 5, 1)
-        plt.imshow(original_image, cmap='gray')
-        plt.title(f'True: {label_names[true_label]}')
+        plt.title(f'True: {label_names[true_label]}', color='white')
         plt.axis('off')
+        plt.ylabel('[0, 80] HU', color='white')
 
-        # FBP reconstruction
-        plt.subplot(1, 5, 2)
-        fbp_image = fbp_dataset[idx][0].numpy().squeeze()  # Load FBP image
+        # Original image with true label (Bone)
+        plt.subplot(2, 4, 5)
+        original_image_bone = apply_window(original_image, *bone_window)
+        plt.imshow(original_image_bone, cmap='gray', vmin=bone_window[0], vmax=bone_window[1])
+        # plt.title('Original Bone', color='white')
+        plt.axis('off')
+        plt.ylabel('[-1000, 2000] HU', color='white')
+
+        # FBP reconstruction (Brain)
+        plt.subplot(2, 4, 2)
+        fbp_image = fbp_dataset[idx][0].numpy().squeeze()
+        fbp_image_brain = apply_window(fbp_image, *brain_window)
         fbp_pred = np.argmax(fbp_predictions[idx])
-        plt.imshow(fbp_image, cmap='gray')
-        plt.title(f'FBP: {label_names[fbp_pred]}')
+        plt.imshow(fbp_image_brain, cmap='gray', vmin=brain_window[0], vmax=brain_window[1])
+        plt.title(f'FBP: {label_names[fbp_pred]}', color='white')
         plt.axis('off')
+        plt.ylabel('[0, 80] HU', color='white')
 
-        # MBIR reconstruction
-        plt.subplot(1, 5, 3)
-        mbir_image = mbir_dataset[idx][0].numpy().squeeze()  # Load MBIR image
+        # FBP reconstruction (Bone)
+        plt.subplot(2, 4, 6)
+        fbp_image_bone = apply_window(fbp_image, *bone_window)
+        plt.imshow(fbp_image_bone, cmap='gray', vmin=bone_window[0], vmax=bone_window[1])
+        # plt.title('FBP Bone', color='white')
+        plt.axis('off')
+        plt.ylabel('[-1000, 2000] HU', color='white')
+
+        # MBIR reconstruction (Brain)
+        plt.subplot(2, 4, 3)
+        mbir_image = mbir_dataset[idx][0].numpy().squeeze()
+        mbir_image_brain = apply_window(mbir_image, *brain_window)
         mbir_pred = np.argmax(mbir_predictions[idx])
-        plt.imshow(mbir_image, cmap='gray')
-        plt.title(f'MBIR: {label_names[mbir_pred]}')
+        plt.imshow(mbir_image_brain, cmap='gray', vmin=brain_window[0], vmax=brain_window[1])
+        plt.title(f'MBIR: {label_names[mbir_pred]}', color='white')
         plt.axis('off')
+        plt.ylabel('[0, 80] HU', color='white')
 
-        # DLR reconstruction
-        plt.subplot(1, 5, 4)
-        dlr_image = dlr_dataset[idx][0].numpy().squeeze()  # Load DLR image
+        # MBIR reconstruction (Bone)
+        plt.subplot(2, 4, 7)
+        mbir_image_bone = apply_window(mbir_image, *bone_window)
+        plt.imshow(mbir_image_bone, cmap='gray', vmin=bone_window[0], vmax=bone_window[1])
+        # plt.title('MBIR Bone', color='white')
+        plt.axis('off')
+        plt.ylabel('[-1000, 2000] HU', color='white')
+
+        # DLR reconstruction (Brain)
+        plt.subplot(2, 4, 4)
+        dlr_image = dlr_dataset[idx][0].numpy().squeeze()
+        dlr_image_brain = apply_window(dlr_image, *brain_window)
         dlr_pred = np.argmax(dlr_predictions[idx])
-        plt.imshow(dlr_image, cmap='gray')
-        plt.title(f'DLR: {label_names[dlr_pred]}')
+        plt.imshow(dlr_image_brain, cmap='gray', vmin=brain_window[0], vmax=brain_window[1])
+        plt.title(f'DLR: {label_names[dlr_pred]}', color='white')
         plt.axis('off')
+        plt.ylabel('[0, 80] HU', color='white')
 
-        plt.suptitle(f'{title_prefix} Case {idx}')
+        # DLR reconstruction (Bone)
+        plt.subplot(2, 4, 8)
+        dlr_image_bone = apply_window(dlr_image, *bone_window)
+        plt.imshow(dlr_image_bone, cmap='gray', vmin=bone_window[0], vmax=bone_window[1])
+        # plt.title('DLR Bone', color='white')
+        plt.axis('off')
+        plt.ylabel('[-1000, 2000] HU', color='white')
+
+        plt.suptitle(f'{title_prefix} Case {idx}', color='white')
         plt.tight_layout()
 
         # Save the figure
-        plt.savefig(f'{cases_dir}/{title_prefix}_case_{idx}.png', dpi=600)
+        plt.savefig(f'{cases_dir}/{title_prefix}_case_{idx}.png', dpi=300, facecolor='black')
         plt.close()
+
 
 # Main code to run the analysis
 if __name__ == "__main__":
