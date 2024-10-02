@@ -1,17 +1,47 @@
 import os
 import torch
-from pytorch_grad_cam import GradCAM
-from pytorch_grad_cam.utils.image import show_cam_on_image
 import matplotlib.pyplot as plt
+import numpy as np
+import torch.nn.functional as F
+import re
 from step0_common_info import dicom_dir
 from step2_dataset_dataloader import RSNA_Intracranial_Hemorrhage_Dataset
 from step3_cnn_classifier import SupervisedClassifier, load_classifier   
-import numpy as np
-import torch.nn.functional as F
 
-def generate_and_save_gradcam_images(model, original_dataset, fbp_dataset, mbir_dataset, dlr_dataset, device, output_folder, specific_cases):
-    target_layer = model.resnet.layer4[2].conv3  # Reference the target layer for Grad-CAM
-    gradcam = GradCAM(model=model, target_layers=[target_layer])
+def apply_window(image, window_min, window_max):
+    """
+    Apply a window to an image.
+    """
+    return np.clip(image, window_min, window_max)
+
+def compute_saliency_maps(model, inputs, target_class):
+    """
+    Compute saliency maps for the given input using the model.
+    """
+    model.eval()
+    inputs.requires_grad = True
+    
+    # Forward pass
+    output = model(inputs)
+    
+    # Zero the gradients
+    model.zero_grad()
+
+    # Get the score for the target class
+    score = output[0][target_class]
+    
+    # Backward pass
+    score.backward()
+
+    # Get the saliency map
+    saliency, _ = torch.max(inputs.grad.data.abs(), dim=1)
+    return saliency
+
+def generate_and_save_saliency_images(model, original_dataset, fbp_dataset, mbir_dataset, dlr_dataset, device, output_folder, specific_cases):
+    # Define the brain window limits
+    window_min, window_max = 0, 80
+
+    # Set the model to evaluation mode
     model.eval()
 
     for case_index in specific_cases:
@@ -22,20 +52,11 @@ def generate_and_save_gradcam_images(model, original_dataset, fbp_dataset, mbir_
         dlr_img, _ = dlr_dataset[case_index]
 
         # Move images to device
-        inputs = inputs.unsqueeze(0).to(device)
-        fbp_img = fbp_img.unsqueeze(0).to(device)
-        mbir_img = mbir_img.unsqueeze(0).to(device)
-        dlr_img = dlr_img.unsqueeze(0).to(device)
-        label = label.to(device)  # No need to unsqueeze here as it should be the correct shape
-
-        # Enable gradient tracking for inputs
-        inputs.requires_grad = True
-        fbp_img.requires_grad = True
-        mbir_img.requires_grad = True
-        dlr_img.requires_grad = True
-
-        # Generate Grad-CAM heatmaps for the original image
-        grayscale_cam_original = gradcam(input_tensor=inputs)
+        inputs = inputs.unsqueeze(0).to(device)  # Add a batch dimension
+        fbp_img = fbp_img.unsqueeze(0).to(device)  # Add a batch dimension
+        mbir_img = mbir_img.unsqueeze(0).to(device)  # Add a batch dimension
+        dlr_img = dlr_img.unsqueeze(0).to(device)  # Add a batch dimension
+        label = label.to(device)
 
         with torch.no_grad():
             # Get model predictions for each input
@@ -61,22 +82,33 @@ def generate_and_save_gradcam_images(model, original_dataset, fbp_dataset, mbir_
 
         # Convert images to NumPy and normalize them
         img = inputs[0].permute(1, 2, 0).detach().cpu().numpy()
+        img = apply_window(img, window_min, window_max)  # Apply brain window
         img_normalized = (img - img.min()) / (img.max() - img.min())
 
         # Normalize FBP, MBIR, and DLR images
         fbp_img_normalized = fbp_img[0].permute(1, 2, 0).detach().cpu().numpy()
+        fbp_img_normalized = apply_window(fbp_img_normalized, window_min, window_max)
         mbir_img_normalized = mbir_img[0].permute(1, 2, 0).detach().cpu().numpy()
+        mbir_img_normalized = apply_window(mbir_img_normalized, window_min, window_max)
         dlr_img_normalized = dlr_img[0].permute(1, 2, 0).detach().cpu().numpy()
+        dlr_img_normalized = apply_window(dlr_img_normalized, window_min, window_max)
 
         # Normalize using numpy operations
         fbp_img_normalized = (fbp_img_normalized - fbp_img_normalized.min()) / (fbp_img_normalized.max() - fbp_img_normalized.min())
         mbir_img_normalized = (mbir_img_normalized - mbir_img_normalized.min()) / (mbir_img_normalized.max() - mbir_img_normalized.min())
         dlr_img_normalized = (dlr_img_normalized - dlr_img_normalized.min()) / (dlr_img_normalized.max() - dlr_img_normalized.min())
 
-        # Generate Grad-CAM heatmaps for FBP, MBIR, and DLR
-        fbp_grayscale_cam = gradcam(input_tensor=fbp_img)
-        mbir_grayscale_cam = gradcam(input_tensor=mbir_img)
-        dlr_grayscale_cam = gradcam(input_tensor=dlr_img)
+        # Compute saliency maps
+        saliency_original = compute_saliency_maps(model, inputs, true_label)
+        saliency_fbp = compute_saliency_maps(model, fbp_img, fbp_predicted_label)
+        saliency_mbir = compute_saliency_maps(model, mbir_img, mbir_predicted_label)
+        saliency_dlr = compute_saliency_maps(model, dlr_img, dlr_predicted_label)
+
+        # Convert saliency maps to numpy and remove first dimension
+        saliency_original = saliency_original.squeeze().detach().cpu().numpy()
+        saliency_fbp = saliency_fbp.squeeze().detach().cpu().numpy()
+        saliency_mbir = saliency_mbir.squeeze().detach().cpu().numpy()
+        saliency_dlr = saliency_dlr.squeeze().detach().cpu().numpy()
 
         # Create a figure with two rows
         fig, axes = plt.subplots(2, 4, figsize=(16, 8))
@@ -101,33 +133,45 @@ def generate_and_save_gradcam_images(model, original_dataset, fbp_dataset, mbir_
         axes[0, 3].set_title(f'DLR Prediction: {dlr_predicted_label}', fontsize=12)
         axes[0, 3].axis('off')
 
-        # Plot Grad-CAM overlays
-        axes[1, 0].imshow(show_cam_on_image(img_normalized, grayscale_cam_original[0, :]))
-        axes[1, 0].set_title(f'Grad-CAM on Original\nTrue Label: {true_label}', fontsize=12)
+        # Overlay saliency maps on the original image
+        axes[1, 0].imshow(img_normalized, cmap='gray')
+        axes[1, 0].imshow(saliency_original, cmap='hot', alpha=0.5)
+        axes[1, 0].set_title(f'Saliency Map on Original\nTrue Label: {true_label}', fontsize=12)
         axes[1, 0].axis('off')
 
-        axes[1, 1].imshow(show_cam_on_image(fbp_img_normalized, fbp_grayscale_cam[0, :]))
-        axes[1, 1].set_title(f'Grad-CAM on FBP\nPred: {fbp_predicted_label}', fontsize=12)
+        axes[1, 1].imshow(fbp_img_normalized, cmap='gray')
+        axes[1, 1].imshow(saliency_fbp, cmap='hot', alpha=0.5)
+        axes[1, 1].set_title(f'Saliency Map on FBP\nPred: {fbp_predicted_label}', fontsize=12)
         axes[1, 1].axis('off')
 
-        axes[1, 2].imshow(show_cam_on_image(mbir_img_normalized, mbir_grayscale_cam[0, :]))
-        axes[1, 2].set_title(f'Grad-CAM on MBIR\nPred: {mbir_predicted_label}', fontsize=12)
+        axes[1, 2].imshow(mbir_img_normalized, cmap='gray')
+        axes[1, 2].imshow(saliency_mbir, cmap='hot', alpha=0.5)
+        axes[1, 2].set_title(f'Saliency Map on MBIR\nPred: {mbir_predicted_label}', fontsize=12)
         axes[1, 2].axis('off')
 
-        axes[1, 3].imshow(show_cam_on_image(dlr_img_normalized, dlr_grayscale_cam[0, :]))
-        axes[1, 3].set_title(f'Grad-CAM on DLR\nPred: {dlr_predicted_label}', fontsize=12)
+        axes[1, 3].imshow(dlr_img_normalized, cmap='gray')
+        axes[1, 3].imshow(saliency_dlr, cmap='hot', alpha=0.5)
+        axes[1, 3].set_title(f'Saliency Map on DLR\nPred: {dlr_predicted_label}', fontsize=12)
         axes[1, 3].axis('off')
 
         plt.tight_layout()
-        plt.savefig(f"{output_folder}/gradcam_index{case_index}.png", dpi=300)
+        plt.savefig(f"{output_folder}/saliency_index{case_index}.png", dpi=300)
         plt.close()
 
 
-# Example usage: loading data and generating Grad-CAM images
+
+def get_case_indices_from_folder(folder_path):
+    case_indices = []
+    for filename in os.listdir(folder_path):
+        match = re.search(r'_case_(\d+)', filename)  # Regex to extract case number
+        if match:
+            case_indices.append(int(match.group(1)))
+    return sorted(set(case_indices))  # Return unique and sorted indices
+
+
+# Example usage: loading data and generating saliency images
 if __name__ == "__main__":
-    batch_size = 32
-    specific_cases = [51, 218, 513, 808, 931]  # Specify the case numbers to visualize
-    output_folder = 'figures/gradcam'  # Directory to save Grad-CAM images
+    output_folder = 'figures/saliency'  # Directory to save Saliency images
 
     os.makedirs(output_folder, exist_ok=True)
 
@@ -135,7 +179,7 @@ if __name__ == "__main__":
 
     # Load the pre-trained model and weights
     model = SupervisedClassifier().to(device)
-    load_classifier(model)  # Assuming this function loads the pre-calculated weights into the model
+    load_classifier(model)
 
     # Create dataset instances
     print('Loading datasets...')
@@ -151,7 +195,11 @@ if __name__ == "__main__":
     mbir_dataset = RSNA_Intracranial_Hemorrhage_Dataset(original_csv_file, mbir_dicom_dir, expected_size=256)
     dlr_dataset = RSNA_Intracranial_Hemorrhage_Dataset(original_csv_file, dlr_dicom_dir, expected_size=256)
 
-    # Generate Grad-CAM images for the specific cases
-    print("Generating Grad-CAM images for the specified cases...")
-    generate_and_save_gradcam_images(model, original_dataset, fbp_dataset, mbir_dataset, dlr_dataset, device, output_folder, specific_cases)
-    print(f"Grad-CAM images saved in '{output_folder}'.")
+    # Get all case indices from the figures/cases folder
+    case_folder = 'figures/cases'
+    specific_cases = get_case_indices_from_folder(case_folder)
+
+    # Generate Saliency images for all cases
+    print("Generating Saliency images for all cases...")
+    generate_and_save_saliency_images(model, original_dataset, fbp_dataset, mbir_dataset, dlr_dataset, device, output_folder, specific_cases)
+    print(f"Saliency images saved in '{output_folder}'.")
