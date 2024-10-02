@@ -68,11 +68,13 @@ class CTProjector(nn.Module):
         self.singular_values_list = torch.linspace(0, index_min_singular_value, 33)[1:].to(torch.int32)
 
     # def to(self, device):
+    #     super(CTProjector, self).to(device)
+    #     # Ensure that all buffers are moved to the correct device
     #     self.U = self.U.to(device)
     #     self.S = self.S.to(device)
     #     self.V = self.V.to(device)
-    #     return super(CTProjector, self).to(device)
-
+    #     return self
+    
     def forward_project(self, image):
         """
         Simulates the forward projection of the image to generate a sinogram (batch-based).
@@ -229,6 +231,66 @@ class CTProjector(nn.Module):
         x_tilde_components = torch.cat(x_tilde_components, dim=1)
 
         return x_tilde_components
+    
+    def inverse_hessian(self, image, meas_var=None, reg=None):
+        """
+        Compute the inverse Hessian of the image using the projector.
+        Args:
+            image (torch.Tensor): The input image tensor of shape (batch-based, 1, 256, 256)
+            reg (float): Regularization parameter to stabilize the inverse Hessian computation
+        
+        Returns:
+            inverse_hessian (torch.Tensor): The computed inverse Hessian of the input image
+        """
+        # Apply V^T to the image
+        VT_x = torch.tensordot(image.view(image.shape[0], 256 * 256), self.V.T, dims=([1], [1])).view(image.shape[0], self.S.shape[0])
+
+        if meas_var is None:
+            meas_var = 1.0
+
+        # Define the inverse of singular values squared
+        if reg is None:
+            invS2 = 1.0 / (self.S**2 / meas_var)
+        else:
+            invS2 = 1.0 / ((self.S**2 / meas_var) + reg)
+
+        # Apply the inverse of singular values squared to the transformed image
+        invS2_VT_x = invS2.view(1, -1) * VT_x
+
+        # Apply V to the result
+        V_invS2_VT_x = torch.tensordot(invS2_VT_x, self.V, dims=([1], [1])).view(image.shape[0], 1, 256, 256)
+
+        return V_invS2_VT_x
+    
+    def null_space(self, image, singular_values=None):
+        """
+        Compute the null space of the image using V VT.
+        Args:
+            image (torch.Tensor): The input image tensor of shape (batch-based, 1, 256, 256)
+            singular_values (list): A list of indices specifying ranges of singular values to use for the reconstruction.
+
+        Returns:
+            null_space (torch.Tensor): The computed null space of the input image
+        """
+        if singular_values is None:
+            singular_values = [self.S.shape[0]]
+
+        assert isinstance(singular_values, list)
+        assert len(singular_values) ==1, 'for now only one singular value range is supported'
+        sv_min = 0
+        sv_max = singular_values[0]
+
+
+        # print("DEBUG: self.V.device", self.V.device)
+        # print("DEBUG: image.device", image.device)
+        VT_x = torch.tensordot(image.view(image.shape[0], 256 * 256), self.V.T, dims=([1], [1])).view(image.shape[0], self.S.shape[0])
+        range_space_transfer = torch.zeros_like(self.S)
+        range_space_transfer[:sv_max] = 1.0 
+        VT_x = VT_x * range_space_transfer
+        range_space_x = torch.tensordot(VT_x, self.V, dims=([1], [1])).view(image.shape[0], 1, 256, 256)
+        null_space_x = image - range_space_x
+
+        return null_space_x
 
 class ReconstructionLossTerm(torch.nn.Module):
     def __init__(self):
@@ -318,6 +380,24 @@ class LinearLogLikelihood(ReconstructionLossTerm):
         # back into the image space. This is equivalent to applying the Hessian operator in the image domain. 
         # Return the result of the Hessian-vector product devidid by the noise variance to adjust the scaling of the Hessian.
         return self.projector.back_project(self.projector.forward_project(image_input)) / self.noise_variance
+    
+    def inverse_hessian(self, image, image_input, reg=None):
+        """
+        Compute the inverse Hessian (second derivative) of the log-likelihood loss with respect to the input image.
+        Specifically, it computes the inverse Hessian-vector product.
+
+        Args:
+            image (torch.Tensor): The input image to be reconstructed of shape (batch-based, 1, 256, 256).
+            image_input (torch.Tensor): The input image tensor used to compute the inverse Hessian-vector product.
+
+        Returns:
+            inverse_hessian (torch.Tensor): The computed inverse Hessian-vector product for the input image.
+        """
+        # Compute the inverse Hessian-vector product by applying the forward projector to the input image
+        # and then back projecting the result back into the image space. This is equivalent to applying the inverse
+        # Hessian operator in the image domain. Return the result of the inverse Hessian-vector product.
+        return self.projector.inverse_hessian(image_input, meas_var=self.noise_variance, reg=reg)
+
 
 class QuadraticSmoothnessLogPrior(ReconstructionLossTerm):
     """

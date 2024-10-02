@@ -6,3 +6,5 @@ pip3 install numpy scipy matplotlib pandas scikit-learn scikit-image seaborn pyd
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 pip3 install transformers diffusers accelearate datasets
 pip3 install torch-ema
+
+# sudo mount.cifs //192.168.69.6/machine_learning_data /mnt/AXIS02_share/ -o username=staticct,mfsymlinks,vers=3.0
