@@ -333,7 +333,7 @@ def load_classifier(model, path='weights/supervised_classifier_resnet50_weights.
 
 # Example usage
 if __name__ == "__main__":
-    train_flag = True
+    train_flag = False
     load_flag = True
     multiGPU_flag = True
     device_ids = [0,1]
@@ -360,9 +360,9 @@ if __name__ == "__main__":
             dicom_dir)
     print('Test dataset size:', len(test_dataset))
 
-    print("Train class distribution:", train_dataset.metadata['subdural'].sum())
-    print("Val class distribution:", val_dataset.metadata['subdural'].sum())
-    print("Test class distribution:", test_dataset.metadata['subdural'].sum())
+    # print("Train class distribution:", train_dataset.metadata['subdural'].sum())
+    # print("Val class distribution:", val_dataset.metadata['subdural'].sum())
+    # print("Test class distribution:", test_dataset.metadata['subdural'].sum())
 
     def compute_sample_weights(metadata, hemorrhage_types):
         class_counts = metadata[hemorrhage_types].sum(axis=0).to_numpy()
@@ -401,7 +401,11 @@ if __name__ == "__main__":
     
 
     # # Obtain classifier output for the test set
-    # all_labels, all_predictions, all_probabilities = observer.get_classifier_output(test_loader)
+    all_labels, all_predictions, all_probabilities = observer.get_classifier_output(test_loader)
+
+    print("Evaluating the model on the test set...")
+    accuracy, ground_truths, predictions = observer.evaluate(test_loader)
+    print(f"Final Test Accuracy: {accuracy * 100:.2f}%")
     
     # # Example of how to print or use these outputs
     # print("Classifier outputs:")
