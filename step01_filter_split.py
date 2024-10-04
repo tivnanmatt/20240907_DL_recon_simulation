@@ -1,6 +1,6 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from step0_common_info import dataset_dir
+from step00_common_info import dataset_dir
 
 # Load the CSV
 filename = f'{dataset_dir}/stage_2_train.csv'

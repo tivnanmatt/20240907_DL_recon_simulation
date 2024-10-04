@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from sklearn.metrics import roc_auc_score, roc_curve
 import numpy as np
 # from nih_chest_xray_reader import NIHChestXrayDataset
-from step2_dataset_dataloader import RSNA_Intracranial_Hemorrhage_Dataset
+from step02_dataset_dataloader import RSNA_Intracranial_Hemorrhage_Dataset
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Subset
