@@ -486,6 +486,76 @@ class QuadraticSmoothnessLogPrior(ReconstructionLossTerm):
         """
         hessian = self.beta * self.laplacian(image_input)
         return hessian
+    
+
+
+
+
+class NonNegativityLogPrior(ReconstructionLossTerm):
+    """
+    This class implements a quadratic smoothness log-prior. It encourages smoothness in
+    the reconstructed image by penalizing the squared Laplacian of the image, i.e. penalizing
+    large differences between neighboring pixels values. The smoothness is enforced using a Laplacian operator.
+
+    Args:
+        beta (float): The regularization parameter that controls the strength of the smoothness penalty.
+    """
+    def __init__(self, beta=1.0):
+        super(NonNegativityLogPrior, self).__init__()
+        self.beta = beta
+
+    def forward(self, image):
+        """
+        Computes the non-negativity log prior loss. This loss penalizes negative values
+
+        Args:
+            image (torch.Tensor): The input image tensor of shape (batch-based, 1, 256, 256).
+            
+        Returns:
+            loss (torch.Tensor): The computed non-negativity log prior loss for the input image.
+        """
+
+        negativeMask = image < 0
+        loss = 0.5 * self.beta * torch.sum((image*negativeMask)**2)
+        return loss
+
+
+    def gradient(self, image, laplacian=None):
+        """
+        Computes the gradient of the non-negativity prior loss with respect to the input image.
+
+        Args:
+            image (torch.Tensor): The input image tensor of shape (batch-based, 1, 256, 256).
+            laplacian (torch.Tensor): The precomputed Laplacian of the input image. If None, the Laplacian
+                is computed using the laplacian() method.
+
+        Returns:
+            gradient (torch.Tensor): The computed gradient of the non-negativity prior loss with respect to the input image.
+        """
+
+        negativeMask = image < 0
+        gradient = self.beta * image*negativeMask
+        return gradient
+    
+    def hessian(self, image, image_input):
+        """ 
+        Computes the Hessian-vector product, which is the second-order derivative
+        of the non-negativity prior loss with respect to the input image.
+
+        Args:
+            image (torch.Tensor): the current image
+            image_input (torch.Tensor): the input image tensor used to compute the Hessian-vector product
+
+        Returns:
+            hessian (torch.Tensor): the computed Hessian-vector product for the input image,
+            which is beta times the negative values of the image_input.
+        """
+        negativeMask = image_input < 0
+        hessian = self.beta * torch.sign(image_input*negativeMask)
+        return hessian
+
+
+
 
 def iterative_reconstruction_gradient_descent(image_init, loss_terms, num_iterations=100, step_size=1.0, verbose=True):
     """
@@ -510,7 +580,12 @@ def iterative_reconstruction_gradient_descent(image_init, loss_terms, num_iterat
     # Store the norm of the gradient from the previous iteration to monitor convergence.
     prev_gradient_norm = 0.0
 
-    for iteration in tqdm(range(num_iterations)):
+    if verbose:
+        iterations_iterable = tqdm(range(num_iterations))
+    else:
+        iterations_iterable = range(num_iterations)
+
+    for iteration in iterations_iterable:
         gradient = torch.zeros_like(image)
 
         # Loop through each loss term and accumulate the gradient contributions from each loss term
@@ -532,8 +607,8 @@ def iterative_reconstruction_gradient_descent(image_init, loss_terms, num_iterat
             step_size = step_size * 1.05
         
         # If the step size becomes too small, terminate iteration
-        if step_size < 1e-6:
-            break
+        # if step_size < 1e-6:
+        #     break
 
         if verbose:
             print('Iteration %d, gradient norm = %f, step size = %f' % (iteration, gradient_norm, step_size))
@@ -660,12 +735,12 @@ def main():
         print(f"Processing batch {i+1}/{num_patients}")
 
         # Simulate forward projection and sinogram with Poisson noise
-        # I0 = 1e10
+        I0 = 1e5
         t0 = time.time()
         sinogram = projector.forward_project(phantom) # Generate sinograms from the phantom
-        # photon_counts = I0 * torch.exp(-sinogram)
-        # photon_counts = torch.poisson(photon_counts)
-        # sinogram = -torch.log((photon_counts + 1) / I0)
+        photon_counts = I0 * torch.exp(-sinogram)
+        photon_counts = torch.poisson(photon_counts)
+        sinogram = -torch.log((photon_counts + 1) / I0)
         t1 = time.time()
         print(f'Elapsed time to forward project = {t1 - t0:.4f}s')
 
@@ -678,11 +753,13 @@ def main():
 
         # Quadratic Penalized Likelihood Iterative Reconstruction
         log_likelihood = LinearLogLikelihood(sinogram, projector, noise_variance=1.0)
+        log_prior_smoothness = QuadraticSmoothnessLogPrior(beta=10.0)
+        log_prior_nonnegativity = NonNegativityLogPrior(beta=1e3)
 
         t0 = time.time()
         reconstruction_quadratic = iterative_reconstruction_gradient_descent(
             pinv_reconstruction.clone(), # Start from the pseudo-inverse reconstruction
-            [log_likelihood, QuadraticSmoothnessLogPrior(beta=10.0)], # Add a smoothness prior
+            [log_likelihood, log_prior_smoothness, log_prior_nonnegativity], # Add a smoothness prior
             num_iterations=500,
             step_size=1e-2,
             verbose=True

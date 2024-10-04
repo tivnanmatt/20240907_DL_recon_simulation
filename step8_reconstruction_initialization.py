@@ -20,6 +20,7 @@ from step4_iterative_reconstruction import (
     attenuation_to_HU,
     LinearLogLikelihood,
     QuadraticSmoothnessLogPrior,
+    NonNegativityLogPrior
 )
 from step5_deep_learning_reconstruction import DeepLearningReconstructor, load_reconstructor
 
@@ -84,11 +85,25 @@ def main():
 
         # MBIR reconstruction
         log_likelihood = LinearLogLikelihood(noisy_sinogram, projector, noise_variance=1.0)
-        log_prior_quadratic = QuadraticSmoothnessLogPrior(beta=50.0)
+        # log_prior_quadratic = QuadraticSmoothnessLogPrior(beta=50.0)
+        log_prior_nonnegativity = NonNegativityLogPrior(beta=1e2)
+        pinv_reconstruction = iterative_reconstruction_gradient_descent(
+            pinv_reconstruction.clone(),
+            [log_likelihood, log_prior_nonnegativity],
+            num_iterations=10,
+            step_size=1e-2,
+            verbose=False
+        )
+
+
+        # MBIR reconstruction
+        log_likelihood = LinearLogLikelihood(noisy_sinogram, projector, noise_variance=1.0)
+        log_prior_quadratic = QuadraticSmoothnessLogPrior(beta=75.0)
+        log_prior_nonnegativity = NonNegativityLogPrior(beta=1e2)
         mbir_reconstruction = iterative_reconstruction_gradient_descent(
             pinv_reconstruction.clone(),
-            [log_likelihood, log_prior_quadratic],
-            num_iterations=100,
+            [log_likelihood, log_prior_quadratic, log_prior_nonnegativity],
+            num_iterations=20,
             step_size=1e-2,
             verbose=False
         )
@@ -97,7 +112,24 @@ def main():
         x_tilde_components = projector.pseudoinverse_reconstruction(
                     sinogram, reconstructor.singular_values_list.to(device)
                 )
+        # reconstruction = reconstructor(x_tilde_components)
+
+        # pad the x_tilde_components from 1x1x256x256 to 1x1x266x266 using reflection padding
+        reflection_padding = 16
+        x_tilde_components = nn.functional.pad(x_tilde_components, (reflection_padding, reflection_padding, reflection_padding, reflection_padding), mode='reflect')
+
         reconstruction = reconstructor(x_tilde_components)
+
+        # extract the central 256x256 region
+        reconstruction = reconstruction[:, :, reflection_padding:-reflection_padding, reflection_padding:-reflection_padding]
+
+        # Remove a margin of 2 pixels from the reconstructed images
+        # margin=2
+        # reconstruction[:, :, :margin,:] = 0
+        # reconstruction[:, :, -margin:,:] = 0
+        # reconstruction[:, :, :, :margin] = 0
+        # reconstruction[:, :, :, -margin:] = 0
+        
 
         # Convert images back to HU units
         pinv_reconstruction_HU = attenuation_to_HU(pinv_reconstruction).squeeze()

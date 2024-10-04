@@ -5,7 +5,7 @@
 
 import os
 # visible device 3
-# os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 import torch
 import torch.nn as nn
@@ -28,14 +28,14 @@ class UnconditionalDiffusionModel(nn.Module):
     def __init__(self):
         super(UnconditionalDiffusionModel, self).__init__()
         
-        # block_out_channels = (16, 32, 64, 128)
-        # layers_per_block = 2
-
-        block_out_channels = (128, 256, 512, 1024)
+        block_out_channels = (32, 64, 128, 256)
         layers_per_block = 4
+
+        # block_out_channels = (128, 256, 512, 1024)
+        # layers_per_block = 4
         
         self.unet = UNet2DModel(
-            sample_size=64,
+            sample_size=None,
             in_channels=1,  # 32 components from the pseudo-inverse
             out_channels=1,  # Final reconstructed image
             center_input_sample=False,
@@ -85,6 +85,15 @@ class UnconditionalDiffusionModel(nn.Module):
         
         def c_out(t):
             return sigma_data*torch.sqrt(t)/torch.sqrt(t + sigma_data**2)
+        
+
+        # # I am skeptical about the EDM preconditioning, switching to a direct denoiser
+
+        def c_skip(t):
+            return torch.ones_like(t).to(torch.float32)
+        
+        def c_out(t):
+            return torch.sqrt(t)
         
         return c_skip(t).view(-1,1,1,1) * x_t + c_out(t).view(-1,1,1,1) * self.unet(x_t, t.view(-1))[0]
 
@@ -188,7 +197,7 @@ class DiffusionPosteriorSampling(UnconditionalDiffusionModel):
 
 
 class DiffusionLossClosure(nn.Module):
-    def __init__(self, diffusion_model, patch_size=256, brain_weight=0.95, T=0.01):
+    def __init__(self, diffusion_model, patch_size=256, brain_weight=0.95, T=1.0):
         super(DiffusionLossClosure, self).__init__()
         self.diffusion_model = diffusion_model
         self.patch_size = patch_size
@@ -309,7 +318,7 @@ def evaluate_diffusion_model(diffusion_model, projector, test_loader, num_sample
             x_0 = HU_to_SU(x_0)
 
             # sample the forward diffusion process, p(x_t|x_0) at time t
-            t = torch.tensor([0.01], device=device)
+            t = torch.tensor([1.0], device=device)
             # x_t = diffusion_model.sample_x_t_given_x_0(pseudoinverse_SU, t)
             x_t = diffusion_model.sample_x_t_given_x_0(x_0, t)
 

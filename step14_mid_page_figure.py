@@ -135,7 +135,7 @@ class PairedImageSaver:
         # Create a figure for 9 rows and 8 columns (1 extra column for window labels)
         fig = plt.figure(figsize=(15, 20))
         gs = gridspec.GridSpec(9, 8, height_ratios=[0.02] + [0.1, 0.1] * 4, width_ratios=[0.1] + [0.1] + [1] * 6)
-        fig.subplots_adjust(hspace=0.2, wspace=0.2)
+        fig.subplots_adjust(hspace=0.0, wspace=0.0)
         fig.patch.set_facecolor('black')
 
         # Title for the header row
@@ -184,14 +184,17 @@ class PairedImageSaver:
                     brain_image = self.apply_window(reconstructed_images[recon_method], *self.brain_window)
                     bone_image = self.apply_window(reconstructed_images[recon_method], *self.bone_window)
 
+
+                crop = 16
+
                 # Add brain images
                 ax_brain = fig.add_subplot(gs[recon_idx + 1, label_idx + 2])  # Adjusted index for brain images
-                ax_brain.imshow(brain_image, cmap='gray')
+                ax_brain.imshow(brain_image[crop:-crop, crop:-crop], cmap='gray')
                 ax_brain.axis('off')
 
                 # Add bone images
                 ax_bone = fig.add_subplot(gs[recon_idx + 2, label_idx + 2])  # Adjusted index for bone images
-                ax_bone.imshow(bone_image, cmap='gray')
+                ax_bone.imshow(bone_image[crop:-crop, crop:-crop], cmap='gray')
                 ax_bone.axis('off')
 
             # line_y_position = recon_idx + 3.5  # Position for the line after the bone image row

@@ -1,3 +1,7 @@
+import os
+# visible devices 3
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -10,7 +14,6 @@ from step6_diffusion_training import HU_to_SU, SU_to_HU, get_device
 from torch_ema import ExponentialMovingAverage
 from diffusers import UNet2DModel
 import matplotlib.pyplot as plt
-import os
 import time
 import deepspeed
 
@@ -51,17 +54,17 @@ class PseudoinverseDiffusionBridge(UnconditionalDiffusionModel):
 
     def predict_score_given_x_t(self, x_t, t):
         score = super(PseudoinverseDiffusionBridge, self).predict_score_given_x_t(x_t, t)
-        score = self.projector.null_space(score)
+        # score = self.projector.null_space(score)
         return score
     
-    def sample_x_t_minus_dt_given_x_t(self, x_t, t, dt, mode='sde'):
+    def sample_x_t_minus_dt_given_x_t(self, x_t, t, dt, mode='ode'):
         x_t_minus_dt = super(PseudoinverseDiffusionBridge, self).sample_x_t_minus_dt_given_x_t(x_t, t, dt, mode)
-        x_t_minus_dt = x_t + self.projector.null_space(x_t_minus_dt - x_t)
+        # x_t_minus_dt = x_t + self.projector.null_space(x_t_minus_dt - x_t)
         return x_t_minus_dt
 
-def evaluate_diffusion_model(pseudoinverse_diffusion_brdige, test_loader, num_samples=1, noise_variance=1.0):
-    assert isinstance(pseudoinverse_diffusion_brdige, PseudoinverseDiffusionBridge)
-    assert isinstance(pseudoinverse_diffusion_brdige.projector, CTProjector)
+def evaluate_diffusion_model(pseudoinverse_diffusion_bridge, test_loader, num_samples=1, noise_variance=1.0):
+    assert isinstance(pseudoinverse_diffusion_bridge, PseudoinverseDiffusionBridge)
+    assert isinstance(pseudoinverse_diffusion_bridge.projector, CTProjector)
 
     # measurements = None # Placeholder for measurements
     # linear_log_likelihood = LinearLogLikelihood(measurements, projector, noise_variance=noise_variance)
@@ -77,12 +80,12 @@ def evaluate_diffusion_model(pseudoinverse_diffusion_brdige, test_loader, num_sa
             x_0_HU = x_0.clone()  # Keep original for display
 
             # set the measurements for diffusion posterior sampling model
-            sinogram = pseudoinverse_diffusion_brdige.projector.forward_project(HU_to_attenuation(x_0))
+            sinogram = pseudoinverse_diffusion_bridge.projector.forward_project(HU_to_attenuation(x_0))
 
             # this is only for initialization, 
             # run the pseudoinverse on the sinogram,
             # then convert to SU so we can runn the diffusion forward process
-            pseudoinverse = pseudoinverse_diffusion_brdige.projector.pseudoinverse_reconstruction(
+            pseudoinverse = pseudoinverse_diffusion_bridge.projector.pseudoinverse_reconstruction(
                                                                         sinogram, 
                                                                         singular_values=[3000])
             pseudoinverse_HU = attenuation_to_HU(pseudoinverse)
@@ -92,16 +95,16 @@ def evaluate_diffusion_model(pseudoinverse_diffusion_brdige, test_loader, num_sa
             x_0 = HU_to_SU(x_0)
 
             # sample the forward diffusion process, p(x_t|x_0) at time t
-            t = torch.tensor([0.01], device=device)
-            # x_t = diffusion_model.sample_x_t_given_x_0(pseudoinverse_SU, t)
-            x_t = pseudoinverse_diffusion_brdige.sample_x_t_given_x_0(x_0, t)
+            t = torch.tensor([1.0], device=device)
+            x_t = pseudoinverse_diffusion_bridge.sample_x_t_given_x_0(pseudoinverse_SU, t)
+            # x_t = pseudoinverse_diffusion_brdige.sample_x_t_given_x_0(x_0, t)
 
-            num_steps = 32
+            num_steps = 128
             timesteps = (torch.linspace(1.0, 0.0, num_steps + 1).to(device)**2.0) * t.item()
 
-            x_0_hat = pseudoinverse_diffusion_brdige.sample_x_0_given_x_t(x_t, 
+            x_0_hat = pseudoinverse_diffusion_bridge.sample_x_0_given_x_t(x_t, 
                                                                           t, 
-                                                                          mode='ode', 
+                                                                          mode='sde', 
                                                                           timesteps=timesteps)
 
             x_0_hat = SU_to_HU(x_0_hat)
@@ -153,8 +156,8 @@ class PDBLossClosure(nn.Module):
     def __init__(self, 
                  pseudoinverse_diffusion_bridge, 
                  patch_size=256, 
-                 brain_weight=0.95, 
-                 T=0.01):
+                 brain_weight=0.99, 
+                 T=1.0):
         super(PDBLossClosure, self).__init__()
         self.pseudoinverse_diffusion_bridge = pseudoinverse_diffusion_bridge
         self.patch_size = patch_size
@@ -307,17 +310,17 @@ def load_diffusion_model_weights(diffusion_model, load_path):
     diffusion_model.load_state_dict(state_dict)
 
 def main():
-    print('AT LEAST I STARTED')
+    # print('AT LEAST I STARTED')
     train_flag = True
-    load_flag = True
-    use_deepspeed = True  # Set this flag to control whether to use DeepSpeed
+    load_flag = False
+    use_deepspeed = False  # Set this flag to control whether to use DeepSpeed
     # device_input = [0,1,2,3] if use_deepspeed else [0]  # Use multiple GPUs for DeepSpeed, single GPU otherwise
-    batch_size = 1
-    num_epochs = 1
-    num_iterations_train = 10
+    batch_size = 32
+    num_epochs = 10
+    num_iterations_train = 100
     num_iterations_val = 5
     lr = 1e-4
-    patch_size = 256
+    patch_size = 64
 
     from step0_common_info import dicom_dir
 
@@ -365,10 +368,14 @@ def main():
             # Train the model using DeepSpeed
             train_diffusion_model_with_deepspeed(loss_closure, train_loader, num_epochs, num_iterations_train, lr)
 
-            save_diffusion_model_weights(pseudoinverse_diffusion_bridge, 'weights/PDB_weights.pth')
         else:
+
+            pseudoinverse_diffusion_bridge = pseudoinverse_diffusion_bridge.to(device)
             # Train the model normally on a single GPU
             train_model(loss_closure, train_loader, num_epochs, num_iterations_train, lr)
+
+
+    save_diffusion_model_weights(pseudoinverse_diffusion_bridge, 'weights/PDB_weights.pth')
 
     # Move the diffusion model to the device
     pseudoinverse_diffusion_bridge.to(device)
