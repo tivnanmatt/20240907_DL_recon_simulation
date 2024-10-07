@@ -10,7 +10,8 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
 
         if dicom_dir is None:
             dicom_dir = dataset_dir + '/stage_2_train'
-        self.metadata = pd.read_csv('data/metadata_evaluation.csv')
+        # self.metadata = pd.read_csv('data/metadata_evaluation.csv')
+        self.metadata = pd.read_csv(csv_file)
         # Clip metadata to only include the first 10000 rows
         # self.metadata = self.metadata.iloc
         self.dicom_dir = dicom_dir
@@ -76,8 +77,8 @@ class RSNA_Intracranial_Hemorrhage_Dataset(Dataset):
         if self.expected_size == 512 and (image.shape[1] != 512 or image.shape[2] != 512):
             # Handle this case more gracefully, e.g., by skipping or logging
             # return self.__getitem__((idx + 1) % len(self.metadata))
-            print(f"Warning: Image at index {idx} is not 512x512, skipping.")
-            return None, None
+            print(f"Warning: Image at index {idx} is not 512x512, returning image at index {idx+1}")
+            return self.__getitem__(idx + 1)
         
         if self.expected_size == 256 and (image.shape[1] != 256 or image.shape[2] != 256):
             # Handle size check for reconstructed images

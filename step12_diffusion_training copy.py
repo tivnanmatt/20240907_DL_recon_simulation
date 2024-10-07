@@ -13,13 +13,13 @@ import numpy as np
 from diffusers import UNet2DModel
 from torch_ema import ExponentialMovingAverage
 from tqdm import tqdm
-from step2_dataset_dataloader import RSNA_Intracranial_Hemorrhage_Dataset
+from step02_dataset_dataloader import RSNA_Intracranial_Hemorrhage_Dataset
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import WeightedRandomSampler
 from diffusers import AutoencoderKL, UNet2DConditionModel
 from torch.utils.data import DataLoader, Subset
 from sklearn.model_selection import train_test_split
-from step4_iterative_reconstruction import CTProjector, LinearLogLikelihood, HU_to_attenuation, attenuation_to_HU
+from step10_iterative_reconstruction import CTProjector, LinearLogLikelihood, HU_to_attenuation, attenuation_to_HU
 import matplotlib.pyplot as plt  # Import matplotlib for plotting
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -585,7 +585,7 @@ def main():
     lr = 1e-4
     patch_size = 64
 
-    from step0_common_info import dicom_dir
+    from step00_common_info import dicom_dir
 
     train_dataset = RSNA_Intracranial_Hemorrhage_Dataset(
             'data/metadata_training.csv',
