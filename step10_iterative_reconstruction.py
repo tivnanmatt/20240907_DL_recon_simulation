@@ -399,6 +399,18 @@ class LinearLogLikelihood(ReconstructionLossTerm):
         return self.projector.inverse_hessian(image_input, meas_var=self.noise_variance, reg=reg)
 
 
+class ProximalLogPrior(ReconstructionLossTerm):
+    def __init__(self, image_prior, beta=1.0):
+        super(ProximalLogPrior, self).__init__()
+        self.image_prior = image_prior
+        self.beta = beta
+    def forward(self, image):
+        return 0.5 * self.beta * torch.sum((image - self.image_prior)**2)
+    def gradient(self, image):
+        return self.beta * (image - self.image_prior)
+    def hessian(self, image, image_input):
+        return self.beta * torch.ones_like(image)
+
 class QuadraticSmoothnessLogPrior(ReconstructionLossTerm):
     """
     This class implements a quadratic smoothness log-prior. It encourages smoothness in

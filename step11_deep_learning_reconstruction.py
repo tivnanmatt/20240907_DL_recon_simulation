@@ -12,6 +12,20 @@ import matplotlib.pyplot as plt
 import os
 import time
 
+from step10_iterative_reconstruction import (
+    CTProjector,
+    iterative_reconstruction_gradient_descent,
+    HU_to_attenuation,
+    attenuation_to_HU,
+    LinearLogLikelihood,
+    QuadraticSmoothnessLogPrior,
+    ProximalLogPrior,
+    NonNegativityLogPrior
+)
+
+# Set environment variable for CUDA memory allocation
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
 # Device handling function (CPU/GPU)
 def get_device(device_input):
     if isinstance(device_input, list):
@@ -20,6 +34,18 @@ def get_device(device_input):
     else:
         device_ids = None
         device = torch.device(device_input)
+    return device, device_ids
+
+# def get_device(device_input):
+#     if isinstance(device_input, list):
+#         device_ids = device_input
+#         device = torch.device(f"cuda:{device_ids[0]}" if torch.cuda.is_available() else "cpu")
+#     else:
+#         device_ids = None
+#         device = torch.device(f"cuda:{device_input}" if torch.cuda.is_available() else "cpu")
+    
+    # Explicitly set the default GPU to the second one
+    torch.cuda.set_device(device)  # Set to cuda:1
     return device, device_ids
 
 
@@ -71,7 +97,7 @@ class DeepLearningReconstructor(nn.Module):
     # Forward pass through the model
     def forward(self, x_tilde):
         t = torch.zeros(x_tilde.shape[0], device=x_tilde.device) # Time input
-        x_hat = self.unet(x_tilde, t)[0] # Run the Unet model
+        x_hat = torch.sum(x_tilde, dim=1, keepdim=True) + self.unet(x_tilde, t)[0] # Run the Unet model
         return x_hat
 
 
@@ -233,6 +259,9 @@ def train_model(projector,
 
             train_loss += loss.item() # Accumulate the training loss for this batch
 
+            # Free unused memory after each iteration
+            torch.cuda.empty_cache
+
         # Report RMSE
         print(f'Epoch {epoch + 1}/{num_epochs}, Training RMSE (HU): {np.sqrt(train_loss / num_iterations_train)}')
 
@@ -262,10 +291,10 @@ def train_model(projector,
             print(f'Validation RMSE (HU): {np.sqrt(val_loss / num_iterations_val)}')
 
         # Save the optimizer state after each epoch
-        torch.save(optimizer.state_dict(), 'weights/deep_learning_reconstructor_optimizer.pth')
+        torch.save(optimizer.state_dict(), 'weights/deep_learning_reconstructor_optimizer_10102024.pth')
 
         # Save the model after each epoch
-        save_reconstructor(reconstructor, 'weights/deep_learning_reconstructor.pth')
+        save_reconstructor(reconstructor, 'weights/deep_learning_reconstructor_10102024.pth')
 
 # Save the reconstructor model's state dict
 def save_reconstructor(reconstructor, filename):
@@ -333,6 +362,21 @@ def evaluate_reconstructor(projector, reconstructor, test_loader, num_iterations
 
         t0 = time.time()
         reconstruction = reconstructor(x_tilde_components)
+
+
+        # DLR non-negativity constraint
+        log_likelihood = LinearLogLikelihood(sinogram, projector, noise_variance=1.0)
+        log_prior_proximal = ProximalLogPrior(image_prior=reconstruction, beta=10.0)
+        # log_prior_quadratic = QuadraticSmoothnessLogPrior(beta=50.0)
+        log_prior_nonnegativity = NonNegativityLogPrior(beta=1e2)
+        reconstruction = iterative_reconstruction_gradient_descent(
+            reconstruction.clone(),
+            [log_likelihood, log_prior_proximal, log_prior_nonnegativity],
+            num_iterations=10,
+            step_size=1e-2,
+            verbose=False
+        )
+
         t1 = time.time()
         print(f'Elapsed time for deep learning reconstruction = {t1 - t0:.4f}s')
 
@@ -388,12 +432,13 @@ def plot_reconstructions(vmin, vmax, filename, phantom, sinogram, pinv_reconstru
 # Main script
 def main():
 
-    train_flag = True  # Set to True to enable training
+    train_flag = False  # Set to True to enable training
     evaluate_flag = True  # Set to True to run evaluation after training
     load_flag = True # Load pre-trained model if available
-    device_input = [0, 1, 2, 3]  # For multi-GPU
+    # device_input = [0, 1, 2, 3]  # For multi-GPU
+    device_input = [1]
     # device_input = 'cuda'  # For single GPU
-    batch_size = 16
+    batch_size = 4
     num_epochs = 5  # Adjust as needed
     num_iterations_train = 100
     num_iterations_val = 1
@@ -470,17 +515,19 @@ def main():
                 device_input=device_input
             )
 
-            save_reconstructor(reconstructor, 'weights/deep_learning_reconstructor.pth')
+            save_reconstructor(reconstructor, 'weights/deep_learning_reconstructor_10102024.pth')
 
-            if evaluate_flag:
-                # Evaluate the reconstructor
-                evaluate_reconstructor(
-                    projector,
-                    reconstructor,
-                    test_loader,
-                    num_iterations=num_iterations_test,
-                    device_input=device_input
-                )
+    if evaluate_flag:
+        projector = projector.to(device)
+        reconstructor = reconstructor.to(device)
+        # Evaluate the reconstructor
+        evaluate_reconstructor(
+            projector,
+            reconstructor,
+            test_loader,
+            num_iterations=num_iterations_test,
+            device_input=device_input
+        )
 
 if __name__ == "__main__":
     t0 = time.time()

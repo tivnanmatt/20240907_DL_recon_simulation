@@ -98,7 +98,7 @@ def plot_confusion_matrix(ground_truths, predictions, labels, dataset_name, norm
     plt.tight_layout()
     
     # Save the confusion matrix plot
-    plt.savefig(f'figures/confusion_matrix_{dataset_name}.png', dpi=300)
+    plt.savefig(f'figures/confusion/confusion_matrix_{dataset_name}.png', dpi=300)
     plt.close()
     
     print(f'Confusion matrix for {dataset_name} saved to "figures/confusion_matrix_{dataset_name}.png"')
@@ -141,7 +141,7 @@ if __name__ == "__main__":
     csv_file = 'data/metadata_evaluation.csv'  # CSV file for labels
     batch_size = 128
     device_ids = [0, 1]
-    multiGPU_flag = True
+    multiGPU_flag = False
 
     dicom_dirs = {
         'FBP_reconstructions': 'data/FBP_reconstructions',
@@ -156,7 +156,7 @@ if __name__ == "__main__":
         observer.model = torch.nn.DataParallel(observer.model, device_ids=device_ids)
 
     try:
-        observer.model = load_classifier(observer.model, 'weights/supervised_classifier_resnet50_weights.pth')
+        observer.model = load_classifier(observer.model, 'weights/supervised_classifier_resnet50_weights_09102024.pth')
         print("Model weights loaded successfully.")
     except FileNotFoundError:
         print("Weights file not found. Please ensure the model is trained and weights are saved.")

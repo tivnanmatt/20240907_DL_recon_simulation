@@ -72,21 +72,37 @@ def plot_grouped_bar_auc_ovo(auc_data):
     print(ovr_data['Label'].dropna().unique())
     print(ovr_data['Reconstruction Type'].dropna().unique())
 
-    plt.figure(figsize=(18, 10))
+    plt.figure(figsize=(9, 6))
     
     # Use Seaborn to plot the grouped bar chart
     sns.barplot(data=ovr_data, x='Label', y='AUC', hue='Reconstruction Type', palette='Set2', ci=None)
     
     # Customize the plot
-    plt.title('Grouped Bar Chart of OvO AUC Scores by Label and Reconstruction Type', fontsize=16)
-    plt.xlabel('Class Label')
+    plt.title('OvO AUC Scores by Hemorrhage and Reconstruction', fontsize=16)
+    plt.xlabel('Hemorrhage Type')
     plt.ylabel('AUC Score')
     plt.legend(title='Reconstruction Type', title_fontsize='13', fontsize='11')
-    plt.xticks(rotation=45)  # Rotate x-axis labels for better readability
-    plt.ylim(0.6, 1)  # AUC scores are between 0 and 1
+    plt.xticks(rotation=10)  # Rotate x-axis labels for better readability
+    plt.ylim(0.8, 1)  # AUC scores are between 0 and 1
     
+    plt.savefig('figures/ovo_auc_grouped_bar_charts_by_label.png', dpi=300)
+    # plt.show()
+
+
+    # now same for ovr
+    plt.figure(figsize=(9, 6))
+
+    sns.barplot(data=ovr_data, x='Label', y='AUC', hue='Reconstruction Type', palette='Set2', ci=None)
+
+    plt.title('OvR AUC Scores by Hemorrhage and Reconstruction', fontsize=16)
+    plt.xlabel('Hemorrhage Type')
+    plt.ylabel('AUC Score')
+    plt.legend(title='Reconstruction Type', title_fontsize='13', fontsize='11')
+    plt.xticks(rotation=10)
+    plt.ylim(0.8, 1)
+
     plt.savefig('figures/ovr_auc_grouped_bar_charts_by_label.png', dpi=300)
-    plt.show()
+    # plt.show()
 
 # Main function to process datasets and generate plots
 def main():

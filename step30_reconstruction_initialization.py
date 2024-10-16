@@ -20,6 +20,7 @@ from step10_iterative_reconstruction import (
     attenuation_to_HU,
     LinearLogLikelihood,
     QuadraticSmoothnessLogPrior,
+    ProximalLogPrior,
     NonNegativityLogPrior
 )
 from step11_deep_learning_reconstruction import DeepLearningReconstructor, load_reconstructor
@@ -76,6 +77,7 @@ def main():
         photon_counts = I0 * torch.exp(-sinogram)
         photon_counts = torch.poisson(photon_counts)
         noisy_sinogram = -torch.log((photon_counts + 1) / I0)
+        # noisy_sinogram = sinogram
 
         # Pseudoinverse reconstruction (FBP)
         sinogram = sinogram.unsqueeze(0)
@@ -130,6 +132,20 @@ def main():
         # reconstruction[:, :, :, :margin] = 0
         # reconstruction[:, :, :, -margin:] = 0
         
+
+        # DLR non-negativity constraint
+        log_likelihood = LinearLogLikelihood(noisy_sinogram, projector, noise_variance=1.0)
+        log_prior_proximal = ProximalLogPrior(image_prior=reconstruction, beta=10.0)
+        # log_prior_quadratic = QuadraticSmoothnessLogPrior(beta=50.0)
+        log_prior_nonnegativity = NonNegativityLogPrior(beta=1e2)
+        reconstruction = iterative_reconstruction_gradient_descent(
+            reconstruction.clone(),
+            [log_likelihood, log_prior_proximal, log_prior_nonnegativity],
+            num_iterations=10,
+            step_size=1e-2,
+            verbose=False
+        )
+
 
         # Convert images back to HU units
         pinv_reconstruction_HU = attenuation_to_HU(pinv_reconstruction).squeeze()

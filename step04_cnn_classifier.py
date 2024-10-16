@@ -15,6 +15,10 @@ from itertools import combinations
 import pandas as pd
 from torch_ema import ExponentialMovingAverage
 
+# os visible devices to 1
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
 # Get the 'tab20' colormap
 cmap = plt.get_cmap('tab20')
 
@@ -85,6 +89,19 @@ class SupervisedClassifierObserver:
                 noise = torch.randn_like(images) * noise_std
 
                 images_noisy = images + noise
+
+                # now blur it with a gaussian kernel
+                xx,yy = torch.meshgrid([torch.arange(-19,20).float(), torch.arange(-19,20).float()])
+                kernel_max_bw = 6.0
+                kernel_bw = torch.rand(1).to(images.device) * kernel_max_bw
+                rr = torch.sqrt(xx**2 + yy**2).to(images.device)
+                kernel = torch.exp(-rr**2 / (2.0 * kernel_bw**2))
+                kernel = kernel / kernel.sum()
+                kernel = kernel.reshape(1,1,39,39)
+
+                images_noisy_pad = torch.nn.functional.pad(images_noisy, (19,19,19,19), mode='reflect')
+
+                images_noisy = torch.nn.functional.conv2d(images_noisy_pad, kernel, padding=19)
 
 
                 optimizer.zero_grad()
@@ -333,13 +350,13 @@ def load_classifier(model, path='weights/supervised_classifier_resnet50_weights.
 
 # Example usage
 if __name__ == "__main__":
-    train_flag = False
+    train_flag = True
     load_flag = True
-    multiGPU_flag = True
-    device_ids = [0,1]
-    batch_size = 128
-    num_epochs = 100
-    num_iterations_train = 10
+    multiGPU_flag = False
+    device_ids = [1]
+    batch_size = 16
+    num_epochs = 5
+    num_iterations_train = 100
     num_iterations_val = 1
     lr = 1e-4
 
