@@ -99,7 +99,7 @@ def generate_and_save_saliency_images(model, original_dataset, fbp_dataset, mbir
         dlr_img_normalized = (dlr_img_normalized - dlr_img_normalized.min()) / (dlr_img_normalized.max() - dlr_img_normalized.min())
 
         # Compute saliency maps
-        saliency_original = compute_saliency_maps(model, inputs, true_label)
+        saliency_original = compute_saliency_maps(model, inputs, original_predicted_label)
         saliency_fbp = compute_saliency_maps(model, fbp_img, fbp_predicted_label)
         saliency_mbir = compute_saliency_maps(model, mbir_img, mbir_predicted_label)
         saliency_dlr = compute_saliency_maps(model, dlr_img, dlr_predicted_label)
@@ -112,10 +112,11 @@ def generate_and_save_saliency_images(model, original_dataset, fbp_dataset, mbir
 
         # Create a figure with two rows
         fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+        plt.suptitle(f'Case {case_index} - True label: {true_label}', fontsize=16)
 
         # Plot original image with true label
         axes[0, 0].imshow(img_normalized, cmap='gray')
-        axes[0, 0].set_title(f'Original Image\nTrue Label: {true_label}', fontsize=12)
+        axes[0, 0].set_title(f'Original Prediction: {original_predicted_label}', fontsize=12)
         axes[0, 0].axis('off')
 
         # Plot FBP image with predicted label
@@ -136,22 +137,22 @@ def generate_and_save_saliency_images(model, original_dataset, fbp_dataset, mbir
         # Overlay saliency maps on the original image
         axes[1, 0].imshow(img_normalized, cmap='gray')
         axes[1, 0].imshow(saliency_original, cmap='hot', alpha=0.5)
-        axes[1, 0].set_title(f'Saliency Map on Original\nTrue Label: {true_label}', fontsize=12)
+        # axes[1, 0].set_title(f'Saliency Map on Original\nTrue Label: {true_label}', fontsize=12)
         axes[1, 0].axis('off')
 
         axes[1, 1].imshow(fbp_img_normalized, cmap='gray')
         axes[1, 1].imshow(saliency_fbp, cmap='hot', alpha=0.5)
-        axes[1, 1].set_title(f'Saliency Map on FBP\nPred: {fbp_predicted_label}', fontsize=12)
+        # axes[1, 1].set_title(f'Saliency Map on FBP\nPred: {fbp_predicted_label}', fontsize=12)
         axes[1, 1].axis('off')
 
         axes[1, 2].imshow(mbir_img_normalized, cmap='gray')
         axes[1, 2].imshow(saliency_mbir, cmap='hot', alpha=0.5)
-        axes[1, 2].set_title(f'Saliency Map on MBIR\nPred: {mbir_predicted_label}', fontsize=12)
+        # axes[1, 2].set_title(f'Saliency Map on MBIR\nPred: {mbir_predicted_label}', fontsize=12)
         axes[1, 2].axis('off')
 
         axes[1, 3].imshow(dlr_img_normalized, cmap='gray')
         axes[1, 3].imshow(saliency_dlr, cmap='hot', alpha=0.5)
-        axes[1, 3].set_title(f'Saliency Map on DLR\nPred: {dlr_predicted_label}', fontsize=12)
+        # axes[1, 3].set_title(f'Saliency Map on DLR\nPred: {dlr_predicted_label}', fontsize=12)
         axes[1, 3].axis('off')
 
         plt.tight_layout()
@@ -171,7 +172,7 @@ def get_case_indices_from_folder(folder_path):
 
 # Example usage: loading data and generating saliency images
 if __name__ == "__main__":
-    output_folder = 'figures/saliency'  # Directory to save Saliency images
+    output_folder = 'figures/saliency/v6'  # Directory to save Saliency images
 
     os.makedirs(output_folder, exist_ok=True)
 
@@ -196,10 +197,104 @@ if __name__ == "__main__":
     dlr_dataset = RSNA_Intracranial_Hemorrhage_Dataset(original_csv_file, dlr_dicom_dir, expected_size=256)
 
     # Get all case indices from the figures/cases folder
-    case_folder = 'figures/cases'
-    specific_cases = get_case_indices_from_folder(case_folder)
+    case_folder = 'figures/cases/v2'
+    # specific_cases = get_case_indices_from_folder(case_folder)
+    specific_cases = list(range(1, 5)) + list(range(501, 505)) + list(range(601, 605)) + list(range(701, 705)) + list(range(801, 805)) + list(range(901, 905))
 
     # Generate Saliency images for all cases
     print("Generating Saliency images for all cases...")
     generate_and_save_saliency_images(model, original_dataset, fbp_dataset, mbir_dataset, dlr_dataset, device, output_folder, specific_cases)
     print(f"Saliency images saved in '{output_folder}'.")
+
+## Vamilla plotting
+# def generate_and_save_saliency_images(model, original_dataset, fbp_dataset, mbir_dataset, dlr_dataset, device, output_folder, specific_cases):
+#     # Define the brain window limits
+#     window_min, window_max = 0, 80
+
+#     # Set the model to evaluation mode
+#     model.eval()
+
+#     for case_index in specific_cases:
+#         # Load specific images from the datasets
+#         inputs, label = original_dataset[case_index]
+#         fbp_img, _ = fbp_dataset[case_index]
+#         mbir_img, _ = mbir_dataset[case_index]
+#         dlr_img, _ = dlr_dataset[case_index]
+
+#         # Move images to device
+#         inputs = inputs.unsqueeze(0).to(device)  # Add a batch dimension
+#         fbp_img = fbp_img.unsqueeze(0).to(device)
+#         mbir_img = mbir_img.unsqueeze(0).to(device)
+#         dlr_img = dlr_img.unsqueeze(0).to(device)
+#         label = label.to(device)
+
+#         with torch.no_grad():
+#             # Get model predictions for each input
+#             original_predictions = model(inputs)
+#             fbp_predictions = model(fbp_img)
+#             mbir_predictions = model(mbir_img)
+#             dlr_predictions = model(dlr_img)
+
+#             # Apply softmax to get probabilities
+#             original_pred_probs = F.softmax(original_predictions, dim=1).cpu().numpy()
+#             fbp_pred_probs = F.softmax(fbp_predictions, dim=1).cpu().numpy()
+#             mbir_pred_probs = F.softmax(mbir_predictions, dim=1).cpu().numpy()
+#             dlr_pred_probs = F.softmax(dlr_predictions, dim=1).cpu().numpy()
+
+#             # Get true label index from one-hot encoding
+#             true_label = torch.argmax(label).item()
+
+#         # Convert images to NumPy and normalize them
+#         img = inputs[0].detach().cpu().numpy().squeeze()  # Remove the batch dimension
+#         img = apply_window(img, window_min, window_max)
+#         img_normalized = (img - img.min()) / (img.max() - img.min())
+
+#         # Normalize FBP, MBIR, and DLR images
+#         fbp_img_normalized = fbp_img[0].detach().cpu().numpy().squeeze()  # Remove the batch dimension
+#         fbp_img_normalized = apply_window(fbp_img_normalized, window_min, window_max)
+#         mbir_img_normalized = mbir_img[0].detach().cpu().numpy().squeeze()  # Remove the batch dimension
+#         mbir_img_normalized = apply_window(mbir_img_normalized, window_min, window_max)
+#         dlr_img_normalized = dlr_img[0].detach().cpu().numpy().squeeze()  # Remove the batch dimension
+#         dlr_img_normalized = apply_window(dlr_img_normalized, window_min, window_max)
+
+#         # Compute saliency maps
+#         saliency_map = compute_saliency_maps(model, inputs, true_label)
+#         vanilla_gradient = compute_vanilla_gradients(model, inputs, true_label)
+
+#         # Normalize saliency maps
+#         saliency_map = saliency_map / saliency_map.max()
+#         vanilla_gradient = vanilla_gradient / vanilla_gradient.max()
+
+#         # Create a figure with three rows
+#         fig, axes = plt.subplots(nrows=3, ncols=4, figsize=(15, 10))
+
+#         # First row: Original, FBP, MBIR, DLR images
+#         axes[0, 0].imshow(img_normalized, cmap='gray')
+#         axes[0, 1].imshow(fbp_img_normalized, cmap='gray')
+#         axes[0, 2].imshow(mbir_img_normalized, cmap='gray')
+#         axes[0, 3].imshow(dlr_img_normalized, cmap='gray')
+
+#         # Second row: Saliency maps
+#         for i in range(4):
+#             axes[1, i].imshow(saliency_map[0].detach().cpu().numpy().squeeze(), cmap='gray')  # Assuming saliency_map is 2D
+
+#         # Third row: Vanilla gradients
+#         for i in range(4):
+#             axes[2, i].imshow(vanilla_gradient[0].detach().cpu().numpy().squeeze(), cmap='gray')  # Assuming vanilla_gradient is 2D
+
+#         # Set titles and axis labels
+#         axes[0, 0].set_title('Original')
+#         axes[0, 1].set_title('FBP')
+#         axes[0, 2].set_title('MBIR')
+#         axes[0, 3].set_title('DLR')
+#         axes[1, 0].set_title('Saliency Map')
+#         axes[2, 0].set_title('Vanilla Gradient')
+
+#         # Remove axis labels
+#         for i in range(3):
+#             for j in range(4):
+#                 axes[i, j].axis('off')
+
+#         # Save the figure
+#         plt.savefig(os.path.join(output_folder, f'case_{case_index}_saliency.png'))
+#         plt.close()

@@ -7,6 +7,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, roc_curve, confusion_matrix, auc
 from sklearn.preprocessing import label_binarize
 import numpy as np
+from torch.utils.checkpoint import checkpoint
 from tqdm import tqdm
 from torch.utils.data import Subset
 import seaborn as sns
@@ -49,9 +50,18 @@ class SupervisedClassifier(nn.Module):
             nn.Linear(512, 6)  # 6 output classes for multi-class classification
         )
 
+        for module in self.resnet.modules():
+            if isinstance(module, nn.ReLU):
+                module.inplace = False  # Change inplace to False
+
+
     def forward(self, x):
-        # print(f"Input batch size: {x.size()} on {x.device}")
-        return self.resnet(x)
+        # Modify in-place operations like this:
+        out = self.resnet(x)
+        identity = out.clone()  # Clone the tensor to prevent in-place modification
+        out = out + identity  # Avoid in-place operation by creating a new tensor
+        # Continue with the rest of your forward pass...
+        return out# Avoid modifying the output tensor)
     
 
 class SupervisedClassifierObserver:

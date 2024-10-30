@@ -57,10 +57,10 @@ def plot_histograms(metrics, output_dir):
         ax3.hist(data['SSIM_bone'], bins=50, alpha=0.7, label='Bone Window')
 
         # Combine legends
-        ax3.legend(loc='upper right')
+        ax3.legend(loc='upper left')
 
         ax3.set_title(f'{recon_type} SSIM Histogram')
-        ax3.set_ylim(0, 100)
+        # ax3.set_ylim(0, )
         ax3.set_xlabel('SSIM')
         ax3.set_ylabel('Frequency')
 
